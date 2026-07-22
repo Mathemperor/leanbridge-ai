@@ -191,12 +191,26 @@ describe("LeanBridge HTTP API", () => {
   it("returns 503 when the Lean readiness probe fails", async () => {
     const failedVerifier: LeanVerifier = {
       async verify() {
-        return { ...verified, ok: false, status: "failed", exitCode: 1 };
+        return {
+          ...verified,
+          ok: false,
+          status: "failed",
+          output: "lake failed: Permission denied",
+          exitCode: 1,
+        };
       },
     };
     const response = await request(makeApp({ readinessVerifier: failedVerifier })).get("/api/ready");
 
     expect(response.status).toBe(503);
-    expect(response.body).toMatchObject({ ok: false, lean: "unavailable" });
+    expect(response.body).toEqual({
+      ok: false,
+      lean: "unavailable",
+      diagnostic: {
+        status: "failed",
+        command: "demo lean",
+        output: "lake failed: Permission denied",
+      },
+    });
   });
 });
