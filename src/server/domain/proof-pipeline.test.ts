@@ -48,10 +48,10 @@ const verified: VerificationResult = {
 
 class FakeModel implements ProofModel {
   repairs: RepairContext[] = [];
-  shouldThrow = false;
+  failure?: unknown;
 
   async translate(): Promise<Translation> {
-    if (this.shouldThrow) throw new Error("provider secret details");
+    if (this.failure) throw this.failure;
     return initial;
   }
 
@@ -137,17 +137,23 @@ describe("ProofPipeline", () => {
     expect(model.repairs).toHaveLength(0);
   });
 
-  it("records a safe provider failure", async () => {
+  it("records a redacted structured provider failure", async () => {
     const { pipeline, model } = harness([]);
-    model.shouldThrow = true;
+    model.failure = Object.assign(
+      new Error("Incorrect API key sk-proj-super-secret"),
+      { status: 401, code: "invalid_api_key", type: "invalid_request_error" },
+    );
     const job = pipeline.start(source);
 
     await pipeline.run(job.id);
 
-    expect(pipeline.get(job.id)).toMatchObject({
+    const result = pipeline.get(job.id);
+    expect(result).toMatchObject({
       status: "failed",
-      error: "AI translation failed. Check the server configuration and try again.",
+      error: expect.stringMatching(/status=401.*code=invalid_api_key.*type=invalid_request_error/),
     });
+    expect(result?.error).toContain("sk-[redacted]");
+    expect(result?.error).not.toContain("super-secret");
   });
 
   it("re-verifies manually edited Lean without calling the model", async () => {
