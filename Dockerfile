@@ -25,7 +25,9 @@ WORKDIR /app
 COPY lean-project ./lean-project
 RUN cd lean-project \
   && lake exe cache get \
-  && lake env lean LeanBridge/Basic.lean
+  && lake env lean LeanBridge/Basic.lean \
+  && lake env printenv LEAN_PATH > .lean-path \
+  && elan which lean > .lean-bin
 
 FROM node:22-bookworm-slim AS runtime
 
@@ -41,6 +43,7 @@ ENV DEMO_MODE=false
 ENV LEAN_PROJECT_PATH=/app/lean-project
 ENV ELAN_HOME=/opt/elan
 ENV PATH="${ELAN_HOME}/bin:${PATH}"
+ENV LAKE_COMMAND=/usr/local/bin/leanbridge-lake-env
 
 WORKDIR /app
 
@@ -50,6 +53,7 @@ COPY --chmod=0555 --from=application-build /app/dist ./dist
 COPY --chmod=0555 --from=lean-environment /opt/elan /opt/elan
 COPY --chmod=0555 --from=lean-environment /app/lean-project ./lean-project
 COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=0555 docker-lean-wrapper.sh /usr/local/bin/leanbridge-lake-env
 
 EXPOSE 4310
 
