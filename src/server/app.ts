@@ -42,7 +42,15 @@ export function createApp(options: CreateAppOptions): Express {
           options.readinessOptions ?? {},
         );
         if (!result.ok) {
-          response.status(503).json({ ok: false, lean: "unavailable" });
+          response.status(503).json({
+            ok: false,
+            lean: "unavailable",
+            diagnostic: {
+              status: result.status,
+              command: result.command,
+              output: result.output.slice(0, 4_096),
+            },
+          });
           return;
         }
         response.json({ ok: true, lean: "ready" });
