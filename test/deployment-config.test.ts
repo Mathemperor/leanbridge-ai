@@ -28,7 +28,10 @@ describe("cloud deployment configuration", () => {
     expect(dockerfile).toContain("ENV LEAN_PROJECT_PATH=/app/lean-project");
     expect(dockerfile).toMatch(/USER\s+leanbridge/);
     expect(dockerfile).toContain("docker-entrypoint.sh");
-    expect(dockerfile).toMatch(/chmod\s+-R\s+a-w\s+\/app\s+\/opt\/elan/);
+    expect(dockerfile).not.toMatch(/RUN\s+chmod\s+-R\s+a-w\s+\/app\s+\/opt\/elan/);
+    expect(dockerfile).toMatch(/COPY\s+--chmod=0444\s+package\.json\s+package-lock\.json\s+\.\//);
+    expect(dockerfile).toMatch(/COPY\s+--chmod=0555\s+--from=lean-environment\s+\/opt\/elan\s+\/opt\/elan/);
+    expect(dockerfile).toMatch(/COPY\s+--chmod=0555\s+--from=lean-environment\s+\/app\/lean-project\s+\.\/lean-project/);
     expect(dockerfile).not.toContain("lake update");
     expect(dockerfile).not.toMatch(/OPENAI_API_KEY\s*=/);
     expect(dockerfile).not.toMatch(/LEANBRIDGE_BACKEND_TOKEN\s*=/);
