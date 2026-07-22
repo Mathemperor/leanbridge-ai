@@ -2,6 +2,7 @@ import type { ProofJob, ProofRequest, Translation } from "@shared/proof";
 import { sanitizeLeanCode } from "@shared/proof";
 import type { LeanVerifier, ProofModel, VerifyOptions } from "./ports";
 import { InMemoryJobStore } from "./job-store";
+import { safeProviderErrorDetail } from "./safe-error-detail";
 
 const MANUAL_VERIFICATION_NOTE = "用户手动编辑后重新验证。";
 
@@ -89,13 +90,12 @@ export class ProofPipeline {
         });
         this.#store.recordTranslation(id, translation, "repair");
       }
-    } catch {
-      this.#store.fail(
-        id,
-        phase === "model"
-          ? "AI translation failed. Check the server configuration and try again."
-          : "Lean verification could not be started. Check the Lean project configuration.",
-      );
+    } catch (error) {
+      const message = phase === "model"
+        ? "AI translation failed. Check the server configuration and try again."
+        : "Lean verification could not be started. Check the Lean project configuration.";
+      const detail = phase === "model" ? safeProviderErrorDetail(error) : "";
+      this.#store.fail(id, detail ? `${message} ${detail}` : message);
     }
   }
 
