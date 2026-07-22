@@ -40,6 +40,21 @@ describe("cloud deployment configuration", () => {
     expect(entrypoint).toContain("exec \"$@\"");
   });
 
+  it("bypasses Lake dependency materialization in the read-only runtime", async () => {
+    const dockerfile = await read("Dockerfile");
+    const wrapper = await read("docker-lean-wrapper.sh");
+    expect(dockerfile).toContain("lake env printenv LEAN_PATH > .lean-path");
+    expect(dockerfile).toContain("elan which lean > .lean-bin");
+    expect(dockerfile).toContain("ENV LAKE_COMMAND=/usr/local/bin/leanbridge-lake-env");
+    expect(dockerfile).toContain(
+      "COPY --chmod=0555 docker-lean-wrapper.sh /usr/local/bin/leanbridge-lake-env",
+    );
+    expect(wrapper).toContain('[ "$1" = "env" ]');
+    expect(wrapper).toContain('[ "$2" = "lean" ]');
+    expect(wrapper).toContain("export LEAN_PATH");
+    expect(wrapper).toContain('exec "$lean_bin" "$3"');
+  });
+
   it("uses Railway's Dockerfile builder and public health endpoint", async () => {
     const railway = JSON.parse(await read("railway.json")) as {
       build?: { builder?: string };
