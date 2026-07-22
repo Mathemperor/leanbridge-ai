@@ -44,14 +44,12 @@ ENV PATH="${ELAN_HOME}/bin:${PATH}"
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-COPY --from=application-build /app/node_modules ./node_modules
-COPY --from=application-build /app/dist ./dist
-COPY --from=lean-environment /opt/elan /opt/elan
-COPY --from=lean-environment /app/lean-project ./lean-project
-COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-
-RUN chmod -R a-w /app /opt/elan
+COPY --chmod=0444 package.json package-lock.json ./
+COPY --chmod=0555 --from=application-build /app/node_modules ./node_modules
+COPY --chmod=0555 --from=application-build /app/dist ./dist
+COPY --chmod=0555 --from=lean-environment /opt/elan /opt/elan
+COPY --chmod=0555 --from=lean-environment /app/lean-project ./lean-project
+COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 4310
 
