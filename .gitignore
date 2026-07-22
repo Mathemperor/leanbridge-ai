@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env*
+!.env.example
+!.env.docker.example
+.DS_Store
+coverage/
+*.log
+.worktrees/
+lean-project/.lake/
