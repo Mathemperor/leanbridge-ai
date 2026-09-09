@@ -61,6 +61,7 @@ function makeApp(options: {
       model: "gpt-5.6",
       reasoningEffort: "high",
       maxRepairAttempts: 3,
+      grounding: { tavily: false },
       lean: { mode: "demo", projectConfigured: false },
     },
   });
