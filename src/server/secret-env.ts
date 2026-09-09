@@ -15,11 +15,12 @@ export function loadRuntimeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
     unlinkSync(secretFile);
   }
 
-  const [openaiApiKey = "", nebiusApiKey = "", backendToken = ""] = contents
+  const [openaiApiKey = "", nebiusApiKey = "", tavilyApiKey = "", backendToken = ""] = contents
     .toString("utf8")
     .split("\0");
   if (openaiApiKey) runtime.OPENAI_API_KEY = openaiApiKey;
   if (nebiusApiKey) runtime.NEBIUS_API_KEY = nebiusApiKey;
+  if (tavilyApiKey) runtime.TAVILY_API_KEY = tavilyApiKey;
   if (backendToken) runtime.LEANBRIDGE_BACKEND_TOKEN = backendToken;
   contents.fill(0);
   return runtime;
