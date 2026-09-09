@@ -48,6 +48,7 @@ function fakeApi(leanMode: "demo" | "local" | "cloud" = "demo"): LeanBridgeApi {
       model: "gpt-5.6",
       reasoningEffort: "high",
       maxRepairAttempts: 3,
+      grounding: { tavily: false },
       lean: { mode: leanMode, projectConfigured: leanMode !== "demo" },
     }),
     createProof: vi.fn().mockResolvedValue(queued),
@@ -74,6 +75,7 @@ describe("LeanBridge workbench", () => {
       model: "nvidia/nemotron-3-super-120b-a12b",
       reasoningEffort: "high",
       maxRepairAttempts: 3,
+      grounding: { tavily: false },
       lean: { mode: "cloud", projectConfigured: true },
     });
 
@@ -81,6 +83,22 @@ describe("LeanBridge workbench", () => {
 
     expect(await screen.findByText("Nebius · NVIDIA Nemotron")).toBeInTheDocument();
     expect(screen.getByText("Nemotron 生成 · Lean 验证 · 诊断驱动修复")).toBeInTheDocument();
+  });
+
+  it("shows Tavily mathlib grounding when the bonus integration is active", async () => {
+    const api = fakeApi("cloud");
+    api.getConfig = vi.fn().mockResolvedValue({
+      provider: "nebius",
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      reasoningEffort: "high",
+      maxRepairAttempts: 3,
+      grounding: { tavily: true },
+      lean: { mode: "cloud", projectConfigured: true },
+    });
+
+    render(<App api={api} pollIntervalMs={0} />);
+
+    expect(await screen.findByText("Tavily mathlib grounding")).toBeInTheDocument();
   });
 
   it("submits LaTeX and displays verified Lean", async () => {
