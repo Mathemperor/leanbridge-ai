@@ -1,14 +1,21 @@
 import type { ReasoningEffort } from "./adapters/model/openai-proof-model";
 
 const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+const MODEL_PROVIDERS = ["openai", "nebius"] as const;
+const DEFAULT_NEBIUS_BASE_URL = "https://api.tokenfactory.us-central1.nebius.com/v1/";
+const DEFAULT_NEBIUS_MODEL = "nvidia/nemotron-3-super-120b-a12b";
+
+export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
 
 export interface RuntimeConfig {
   port: number;
   cloudMode: boolean;
   demoMode: boolean;
+  provider: ModelProvider;
   apiKey?: string;
   backendToken?: string;
   model: string;
+  baseURL?: string;
   reasoningEffort: ReasoningEffort;
   leanProjectPath?: string;
   leanCommand: string;
@@ -18,7 +25,7 @@ export interface RuntimeConfig {
 }
 
 export interface PublicRuntimeConfig {
-  provider: "demo" | "openai";
+  provider: "demo" | ModelProvider;
   model: string;
   reasoningEffort: ReasoningEffort;
   maxRepairAttempts: number;
@@ -44,14 +51,26 @@ function reasoningEffort(value: string | undefined): ReasoningEffort {
     : "high";
 }
 
+function modelProvider(value: string | undefined): ModelProvider {
+  const normalized = value?.trim().toLowerCase() || "openai";
+  if (!MODEL_PROVIDERS.includes(normalized as ModelProvider)) {
+    throw new Error(`MODEL_PROVIDER must be one of: ${MODEL_PROVIDERS.join(", ")}`);
+  }
+  return normalized as ModelProvider;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
   const cloudMode = booleanValue(env.CLOUD_MODE);
   const demoMode = cloudMode ? false : booleanValue(env.DEMO_MODE);
-  const apiKey = env.OPENAI_API_KEY?.trim();
+  const provider = modelProvider(env.MODEL_PROVIDER);
+  const apiKey = provider === "nebius"
+    ? env.NEBIUS_API_KEY?.trim()
+    : env.OPENAI_API_KEY?.trim();
   const backendToken = env.LEANBRIDGE_BACKEND_TOKEN?.trim();
   const leanProjectPath = env.LEAN_PROJECT_PATH?.trim();
+
   if (!demoMode && !apiKey) {
-    throw new Error("OPENAI_API_KEY is required unless DEMO_MODE=true");
+    throw new Error(`${provider === "nebius" ? "NEBIUS_API_KEY" : "OPENAI_API_KEY"} is required unless DEMO_MODE=true`);
   }
   if (cloudMode && !backendToken) {
     throw new Error("LEANBRIDGE_BACKEND_TOKEN is required in cloud mode");
@@ -60,13 +79,22 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     throw new Error("LEAN_PROJECT_PATH is required in cloud mode");
   }
 
+  const model = provider === "nebius"
+    ? env.NEBIUS_MODEL?.trim() || DEFAULT_NEBIUS_MODEL
+    : env.OPENAI_MODEL?.trim() || "gpt-5.6";
+  const baseURL = provider === "nebius"
+    ? env.NEBIUS_BASE_URL?.trim() || DEFAULT_NEBIUS_BASE_URL
+    : undefined;
+
   return {
     port: boundedInteger(env.PORT, 4_310, 1, 65_535),
     cloudMode,
     demoMode,
+    provider,
     ...(apiKey ? { apiKey } : {}),
     ...(backendToken ? { backendToken } : {}),
-    model: env.OPENAI_MODEL?.trim() || "gpt-5.6",
+    model,
+    ...(baseURL ? { baseURL } : {}),
     reasoningEffort: reasoningEffort(env.OPENAI_REASONING_EFFORT),
     ...(leanProjectPath ? { leanProjectPath } : {}),
     leanCommand: env.LEAN_COMMAND?.trim() || "lean",
@@ -78,7 +106,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
 
 export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
   return {
-    provider: config.demoMode ? "demo" : "openai",
+    provider: config.demoMode ? "demo" : config.provider,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     maxRepairAttempts: config.maxRepairAttempts,
