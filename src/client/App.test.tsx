@@ -67,6 +67,22 @@ describe("LeanBridge workbench", () => {
     expect(await screen.findByText("演示模式")).toBeInTheDocument();
   });
 
+  it("identifies the Nebius Nemotron runtime in the product UI", async () => {
+    const api = fakeApi("cloud");
+    api.getConfig = vi.fn().mockResolvedValue({
+      provider: "nebius",
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      reasoningEffort: "provider-default",
+      maxRepairAttempts: 3,
+      lean: { mode: "cloud", projectConfigured: true },
+    });
+
+    render(<App api={api} pollIntervalMs={0} />);
+
+    expect(await screen.findByText("Nebius · NVIDIA Nemotron")).toBeInTheDocument();
+    expect(screen.getByText("Nemotron 生成 · Lean 验证 · 诊断驱动修复")).toBeInTheDocument();
+  });
+
   it("submits LaTeX and displays verified Lean", async () => {
     const api = fakeApi();
     const user = userEvent.setup();
