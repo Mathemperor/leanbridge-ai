@@ -17,6 +17,8 @@ export interface RuntimeConfig {
   model: string;
   baseURL?: string;
   reasoningEffort: ReasoningEffort;
+  tavilyGroundingEnabled: boolean;
+  tavilyApiKey?: string;
   leanProjectPath?: string;
   leanCommand: string;
   lakeCommand: string;
@@ -29,6 +31,9 @@ export interface PublicRuntimeConfig {
   model: string;
   reasoningEffort: ReasoningEffort;
   maxRepairAttempts: number;
+  grounding: {
+    tavily: boolean;
+  };
   lean: {
     mode: "demo" | "local" | "cloud";
     projectConfigured: boolean;
@@ -68,9 +73,18 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     : env.OPENAI_API_KEY?.trim();
   const backendToken = env.LEANBRIDGE_BACKEND_TOKEN?.trim();
   const leanProjectPath = env.LEAN_PROJECT_PATH?.trim();
+  const tavilyRequested = booleanValue(env.TAVILY_GROUNDING_ENABLED);
+  const tavilyApiKey = env.TAVILY_API_KEY?.trim();
+  const tavilyGroundingEnabled = !demoMode && tavilyRequested;
 
   if (!demoMode && !apiKey) {
     throw new Error(`${provider === "nebius" ? "NEBIUS_API_KEY" : "OPENAI_API_KEY"} is required unless DEMO_MODE=true`);
+  }
+  if (tavilyGroundingEnabled && provider !== "nebius") {
+    throw new Error("TAVILY_GROUNDING_ENABLED requires MODEL_PROVIDER=nebius");
+  }
+  if (tavilyGroundingEnabled && !tavilyApiKey) {
+    throw new Error("TAVILY_API_KEY is required when TAVILY_GROUNDING_ENABLED=true");
   }
   if (cloudMode && !backendToken) {
     throw new Error("LEANBRIDGE_BACKEND_TOKEN is required in cloud mode");
@@ -96,6 +110,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     model,
     ...(baseURL ? { baseURL } : {}),
     reasoningEffort: reasoningEffort(env.OPENAI_REASONING_EFFORT),
+    tavilyGroundingEnabled,
+    ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),
     leanCommand: env.LEAN_COMMAND?.trim() || "lean",
     lakeCommand: env.LAKE_COMMAND?.trim() || "lake",
@@ -110,6 +126,9 @@ export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     maxRepairAttempts: config.maxRepairAttempts,
+    grounding: {
+      tavily: config.tavilyGroundingEnabled,
+    },
     lean: {
       mode: config.cloudMode ? "cloud" : config.demoMode ? "demo" : "local",
       projectConfigured: Boolean(config.leanProjectPath),
