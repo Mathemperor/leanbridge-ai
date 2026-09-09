@@ -98,7 +98,13 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
     }
   };
 
-  const providerLabel = config?.provider === "demo" ? "演示模式" : config ? "OpenAI 已连接" : "连接中";
+  const providerLabel = config?.provider === "demo"
+    ? "演示模式"
+    : config?.provider === "nebius"
+      ? "Nebius · NVIDIA Nemotron"
+      : config?.provider === "openai"
+        ? "OpenAI 已连接"
+        : "连接中";
   const leanLabel = config?.lean.mode === "demo"
     ? "Lean 模拟验证"
     : config?.lean.mode === "cloud"
@@ -125,10 +131,15 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
             <span className="hero-index">FORMAL MATHEMATICS · LEAN 4</span>
             <h1>把证明交给 Lean，<br />而不是交给运气。</h1>
           </div>
-          <p>
-            从手写推导或 LaTeX 出发，经 AI 形式化、Lean 内核验证与诊断修复，
-            得到一份可以编译、可以编辑、也可以追溯的证明。
-          </p>
+          <div className="hero-copy">
+            <p>
+              从手写推导或 LaTeX 出发，经 AI 形式化、Lean 内核验证与诊断修复，
+              得到一份可以编译、可以编辑、也可以追溯的证明。
+            </p>
+            {config?.provider === "nebius" ? (
+              <span className="hackathon-runtime-note">Nemotron 生成 · Lean 验证 · 诊断驱动修复</span>
+            ) : null}
+          </div>
         </section>
 
         {error ? (
