@@ -1,7 +1,7 @@
 import type { ProofJob, ProofRequest } from "@shared/proof";
 
 export interface ClientRuntimeConfig {
-  provider: "demo" | "openai";
+  provider: "demo" | "openai" | "nebius";
   model: string;
   reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   maxRepairAttempts: number;
