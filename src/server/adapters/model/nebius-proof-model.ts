@@ -41,7 +41,7 @@ function sanitizeTranslation(translation: Translation): Translation {
 export class NebiusProofModel implements ProofModel {
   readonly #client: ChatClient;
   readonly #config: NebiusProofModelConfig;
-  readonly #grounder?: MathlibGrounder;
+  readonly #grounder: MathlibGrounder | undefined;
 
   constructor(config: NebiusProofModelConfig, client?: ChatClient, grounder?: MathlibGrounder) {
     this.#config = config;
