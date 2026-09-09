@@ -11,7 +11,9 @@ describe("loadConfig", () => {
       reasoningEffort: "high",
       maxRepairAttempts: 3,
       leanTimeoutMs: 30_000,
+      tavilyGroundingEnabled: false,
     });
+    expect(toPublicConfig(config).grounding).toEqual({ tavily: false });
   });
 
   it("requires an OpenAI API key for the OpenAI provider", () => {
@@ -37,6 +39,34 @@ describe("loadConfig", () => {
       baseURL: "https://api.tokenfactory.us-central1.nebius.com/v1/",
     });
     expect(toPublicConfig(config).provider).toBe("nebius");
+  });
+
+  it("enables Tavily grounding only for Nebius when an API key is present", () => {
+    expect(() => loadConfig({
+      MODEL_PROVIDER: "nebius",
+      NEBIUS_API_KEY: "nebius-test",
+      TAVILY_GROUNDING_ENABLED: "true",
+    })).toThrow(/TAVILY_API_KEY/);
+
+    expect(() => loadConfig({
+      MODEL_PROVIDER: "openai",
+      OPENAI_API_KEY: "openai-test",
+      TAVILY_API_KEY: "tvly-test",
+      TAVILY_GROUNDING_ENABLED: "true",
+    })).toThrow(/MODEL_PROVIDER=nebius/);
+
+    const config = loadConfig({
+      MODEL_PROVIDER: "nebius",
+      NEBIUS_API_KEY: "nebius-test",
+      TAVILY_API_KEY: "tvly-test",
+      TAVILY_GROUNDING_ENABLED: "true",
+    });
+
+    expect(config).toMatchObject({
+      tavilyGroundingEnabled: true,
+      tavilyApiKey: "tvly-test",
+    });
+    expect(toPublicConfig(config).grounding).toEqual({ tavily: true });
   });
 
   it("accepts an explicit Nebius model and Token Factory base URL", () => {
