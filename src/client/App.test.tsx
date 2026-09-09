@@ -72,7 +72,7 @@ describe("LeanBridge workbench", () => {
     api.getConfig = vi.fn().mockResolvedValue({
       provider: "nebius",
       model: "nvidia/nemotron-3-super-120b-a12b",
-      reasoningEffort: "provider-default",
+      reasoningEffort: "high",
       maxRepairAttempts: 3,
       lean: { mode: "cloud", projectConfigured: true },
     });
