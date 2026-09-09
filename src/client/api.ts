@@ -5,6 +5,9 @@ export interface ClientRuntimeConfig {
   model: string;
   reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   maxRepairAttempts: number;
+  grounding: {
+    tavily: boolean;
+  };
   lean: {
     mode: "demo" | "local" | "cloud";
     projectConfigured: boolean;
