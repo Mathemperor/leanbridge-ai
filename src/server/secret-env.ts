@@ -15,8 +15,11 @@ export function loadRuntimeEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
     unlinkSync(secretFile);
   }
 
-  const [apiKey = "", backendToken = ""] = contents.toString("utf8").split("\0");
-  if (apiKey) runtime.OPENAI_API_KEY = apiKey;
+  const [openaiApiKey = "", nebiusApiKey = "", backendToken = ""] = contents
+    .toString("utf8")
+    .split("\0");
+  if (openaiApiKey) runtime.OPENAI_API_KEY = openaiApiKey;
+  if (nebiusApiKey) runtime.NEBIUS_API_KEY = nebiusApiKey;
   if (backendToken) runtime.LEANBRIDGE_BACKEND_TOKEN = backendToken;
   contents.fill(0);
   return runtime;
