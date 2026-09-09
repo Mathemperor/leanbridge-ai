@@ -121,6 +121,7 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
         <div className="runtime-status" aria-label="运行时状态">
           <span><i className={`runtime-light ${config?.provider ?? "loading"}`} />{providerLabel}</span>
           <span>{config?.model ?? "gpt-5.6"} · {config?.reasoningEffort ?? "high"}</span>
+          {config?.grounding.tavily ? <span>Tavily mathlib grounding</span> : null}
           <span>{leanLabel}</span>
         </div>
       </header>
@@ -137,7 +138,9 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
               得到一份可以编译、可以编辑、也可以追溯的证明。
             </p>
             {config?.provider === "nebius" ? (
-              <span className="hackathon-runtime-note">Nemotron 生成 · Lean 验证 · 诊断驱动修复</span>
+              <span className="hackathon-runtime-note">
+                {config.grounding.tavily ? "Tavily 检索 · " : ""}Nemotron 生成 · Lean 验证 · 诊断驱动修复
+              </span>
             ) : null}
           </div>
         </section>
