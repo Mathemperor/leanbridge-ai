@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, toPublicConfig } from "./config";
 
 describe("loadConfig", () => {
+  it("keeps a distinct browser password private and rejects unsafe reuse", () => {
+    const env = { MODEL_PROVIDER: "nebius", NEBIUS_API_KEY: "provider-key-long-value", LEANBRIDGE_BACKEND_TOKEN: "backend-token-long-value", LEANBRIDGE_ACCESS_PASSWORD: "judge-password-long" };
+    const config = loadConfig(env);
+    expect(config).toHaveProperty("accessPassword", "judge-password-long");
+    expect(JSON.stringify(toPublicConfig(config))).not.toContain("judge-password-long");
+    for (const password of ["short", env.NEBIUS_API_KEY, env.LEANBRIDGE_BACKEND_TOKEN]) {
+      expect(() => loadConfig({ ...env, LEANBRIDGE_ACCESS_PASSWORD: password })).toThrow(/LEANBRIDGE_ACCESS_PASSWORD/);
+    }
+  });
   it("uses current OpenAI model and bounded repair defaults", () => {
     const config = loadConfig({ DEMO_MODE: "true" });
     expect(config).toMatchObject({

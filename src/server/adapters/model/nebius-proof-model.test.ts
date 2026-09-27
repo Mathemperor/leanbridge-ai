@@ -43,6 +43,7 @@ describe("NebiusProofModel", () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       model: "nvidia/nemotron-3-super-120b-a12b",
       response_format: { type: "json_object" },
+      max_tokens: 4096,
       messages: [
         expect.objectContaining({ role: "system" }),
         expect.objectContaining({

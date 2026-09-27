@@ -135,7 +135,7 @@ Do not submit until all of these are true:
 
 - the live project makes a confirmed Nebius Token Factory runtime call;
 - if the Tavily bonus is claimed, the submitted build makes a confirmed functional Tavily API runtime call;
-- the public demo URL loads without private account access restrictions;
+- the demo/test-build URL loads and judges have any required private access instructions;
 - the UI correctly reports Nebius/Nemotron when the live path is active;
 - the UI correctly reports Tavily grounding if that integration is enabled in the submitted demo;
 - at least one proof is shown being checked by real Lean/mathlib;

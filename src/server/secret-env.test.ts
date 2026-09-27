@@ -8,7 +8,7 @@ describe("loadRuntimeEnvironment", () => {
   it("loads Docker secrets from a one-time file and removes it", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "leanbridge-secrets-test-"));
     const path = resolve(directory, "runtime");
-    await writeFile(path, Buffer.from("openai-test\0nebius-test\0tvly-test\0token-test-value\0"));
+    await writeFile(path, Buffer.from("openai-test\0nebius-test\0tvly-test\0token-test-value\0judge-password-value\0"));
 
     try {
       const runtime = loadRuntimeEnvironment({
@@ -21,6 +21,7 @@ describe("loadRuntimeEnvironment", () => {
         NEBIUS_API_KEY: "nebius-test",
         TAVILY_API_KEY: "tvly-test",
         LEANBRIDGE_BACKEND_TOKEN: "token-test-value",
+        LEANBRIDGE_ACCESS_PASSWORD: "judge-password-value",
       });
       expect(runtime.LEANBRIDGE_SECRET_FILE).toBeUndefined();
       await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });

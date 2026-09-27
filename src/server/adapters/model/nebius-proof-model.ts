@@ -48,6 +48,8 @@ export class NebiusProofModel implements ProofModel {
     this.#client = client ?? (new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
+      timeout: 90_000,
+      maxRetries: 0,
     }) as unknown as ChatClient);
     this.#grounder = grounder;
   }
@@ -89,6 +91,7 @@ export class NebiusProofModel implements ProofModel {
       model: this.#config.model,
       messages,
       response_format: { type: "json_object" },
+      max_tokens: 4096,
     });
 
     const content = response.choices[0]?.message.content;

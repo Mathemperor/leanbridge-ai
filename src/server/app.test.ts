@@ -1,5 +1,5 @@
 import request from "supertest";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProofRequest, Translation, VerificationResult } from "@shared/proof";
 import type { LeanVerifier, ProofModel, VerifyOptions } from "./domain/ports";
 import { ProofPipeline } from "./domain/proof-pipeline";
@@ -42,6 +42,7 @@ class Verifier implements LeanVerifier {
 
 function makeApp(options: {
   backendToken?: string;
+  accessPassword?: string;
   cloudMode?: boolean;
   readinessVerifier?: LeanVerifier;
   readinessOptions?: VerifyOptions;
@@ -179,6 +180,95 @@ describe("LeanBridge HTTP API", () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toMatch(/工程路径/);
+  });
+
+  it("supports browser login, protected proof requests and logout without exposing secrets", async () => {
+    const protectedApp = makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" });
+    const browser = request.agent(protectedApp);
+    const state = await browser.get("/api/session");
+    expect(state.status).toBe(200);
+    expect(state.body).toEqual({ required: true, available: true, authenticated: false });
+    const login = await browser.post("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" });
+    expect(login.status).toBe(200);
+    const cookie = String(login.headers["set-cookie"]);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(JSON.stringify(login.body) + cookie).not.toMatch(/backend-only|judge-password-long/);
+    expect((await browser.get("/api/config")).status).toBe(200);
+    expect((await browser.post("/api/proofs").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ mode: "latex", latex: "True", autoRepair: false })).status).toBe(202);
+    expect((await browser.delete("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")).status).toBe(200);
+    expect((await browser.get("/api/config")).status).toBe(401);
+  });
+
+  it("rejects wrong passwords, forged sessions and cross-origin login", async () => {
+    const protectedApp = makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" });
+    expect((await request(protectedApp).post("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ password: "backend-only" })).status).toBe(401);
+    expect((await request(protectedApp).get("/api/config")
+      .set("Cookie", "leanbridge_session=forged")).status).toBe(401);
+    expect((await request(protectedApp).post("/api/session").set("Host", "localhost")
+      .set("Origin", "https://other.example").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" })).status).toBe(403);
+    expect((await request(protectedApp).post("/api/session")
+      .send({ password: "judge-password-long" })).status).toBe(403);
+  });
+
+  it("rejects cross-origin cookie writes but preserves bearer clients", async () => {
+    const protectedApp = makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" });
+    const browser = request.agent(protectedApp);
+    await browser.post("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" });
+    expect((await browser.post("/api/proofs").set("Host", "localhost")
+      .set("Origin", "https://other.example").set("X-LeanBridge-Request", "browser")
+      .send({ mode: "latex", latex: "True", autoRepair: false })).status).toBe(403);
+    expect((await request(protectedApp).get("/api/config")
+      .set("Authorization", "Bearer backend-only")).status).toBe(200);
+  });
+
+  it("expires browser sessions after eight hours", async () => {
+    const protectedApp = makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" });
+    const login = await request(protectedApp).post("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" });
+    expect(login.status).toBe(200);
+    const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 8 * 60 * 60 * 1000 + 1);
+    expect((await request(protectedApp).get("/api/config").set("Cookie", cookie)).status).toBe(401);
+  });
+
+  it("requires secure cookies for a non-loopback hostname", async () => {
+    const login = await request(makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" }))
+      .post("/api/session").set("Host", "leanbridge.example")
+      .set("Origin", "https://leanbridge.example").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" });
+    expect(login.status).toBe(200);
+    expect(String(login.headers["set-cookie"])).toContain("Secure");
+  });
+
+  it("limits repeated login failures", async () => {
+    const protectedApp = makeApp({ backendToken: "backend-only", accessPassword: "judge-password-long" });
+    for (let attempt = 0; attempt < 10; attempt++) {
+      expect((await request(protectedApp).post("/api/session").set("Host", "localhost")
+        .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+        .send({ password: "wrong" })).status).toBe(401);
+    }
+    expect((await request(protectedApp).post("/api/session").set("Host", "localhost")
+      .set("Origin", "http://localhost").set("X-LeanBridge-Request", "browser")
+      .send({ password: "judge-password-long" })).status).toBe(429);
+  });
+
+  it("reports when browser access is not configured and leaves demo mode accessible", async () => {
+    expect((await request(makeApp({ backendToken: "backend-only" })).get("/api/session")).body)
+      .toEqual({ required: true, available: false, authenticated: false });
+    expect((await request(makeApp()).get("/api/session")).body)
+      .toEqual({ required: false, available: false, authenticated: true });
   });
 
   it("reports real Lean readiness through the configured verifier", async () => {
