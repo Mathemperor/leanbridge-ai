@@ -8,7 +8,9 @@ LeanBridge AI — Kernel-Verified Mathematical Proof Agent
 
 ## Track
 
-Coding and Agentic Engineering
+Best Apps and Agents
+
+Track selection follows the [official rules checked on September 27, 2026](https://nebiusglobalaihackathon.devpost.com/rules). LeanBridge uses a Nemotron proof agent through Token Factory with its own Docker-based Lean verifier. It does not currently use the Token Factory Sandboxes described for the coding track.
 
 ## One-line pitch
 
