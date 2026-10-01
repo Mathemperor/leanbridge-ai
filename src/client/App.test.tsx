@@ -48,6 +48,7 @@ function fakeApi(leanMode: "demo" | "local" | "cloud" = "demo"): LeanBridgeApi {
       model: "gpt-5.6",
       reasoningEffort: "high",
       maxRepairAttempts: 3,
+      grounding: { tavily: false },
       lean: { mode: leanMode, projectConfigured: leanMode !== "demo" },
     }),
     createProof: vi.fn().mockResolvedValue(queued),
@@ -57,6 +58,52 @@ function fakeApi(leanMode: "demo" | "local" | "cloud" = "demo"): LeanBridgeApi {
 }
 
 describe("LeanBridge workbench", () => {
+  it("recovers from a transient polling failure", async () => {
+    const api = fakeApi();
+    vi.mocked(api.getProof).mockRejectedValueOnce(new Error("temporary network failure"));
+    const user = userEvent.setup();
+    render(<App api={api} pollIntervalMs={0} />);
+    await user.type(screen.getByLabelText("LaTeX 证明"), "Truth");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    expect(await screen.findByText("Lean 验证通过")).toBeInTheDocument();
+    expect(api.getProof).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a manually edited proof when a new submission fails", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} pollIntervalMs={0} />);
+    await user.type(screen.getByLabelText("LaTeX 证明"), "Truth");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    await screen.findByText("Lean 验证通过");
+    fireEvent.change(screen.getByLabelText("Lean 4 代码"), { target: { value: "theorem keep_me : True := by trivial" } });
+    vi.mocked(api.createProof).mockRejectedValueOnce(new Error("Server busy"));
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Server busy");
+    expect(screen.getByLabelText("Lean 4 代码")).toHaveValue("theorem keep_me : True := by trivial");
+  });
+
+  it("waits for capabilities before allowing image input", () => {
+    const api = fakeApi();
+    vi.mocked(api.getConfig).mockReturnValue(new Promise(() => {}));
+    render(<App api={api} />);
+    expect(screen.getByRole("tab", { name: "手写图片" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "生成并验证" })).toBeDisabled();
+  });
+
+  it("pauses after three polling failures and lets the user reconnect", async () => {
+    const api = fakeApi();
+    vi.mocked(api.getProof).mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    render(<App api={api} pollIntervalMs={0} />);
+    await user.type(screen.getByLabelText("LaTeX 证明"), "Truth");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    const retry = await screen.findByRole("button", { name: "重新连接任务" });
+    expect(api.getProof).toHaveBeenCalledTimes(3);
+    vi.mocked(api.getProof).mockResolvedValue(verified);
+    await user.click(retry);
+    expect(await screen.findByText("Lean 验证通过")).toBeInTheDocument();
+  });
   it("renders a proof-focused source, editor, and verification layout", async () => {
     render(<App api={fakeApi()} pollIntervalMs={0} />);
 
@@ -65,6 +112,40 @@ describe("LeanBridge workbench", () => {
     expect(screen.getByLabelText("Lean 4 代码")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "验证轨迹" })).toBeInTheDocument();
     expect(await screen.findByText("演示模式")).toBeInTheDocument();
+  });
+
+  it("identifies the Nebius Nemotron runtime in the product UI", async () => {
+    const api = fakeApi("cloud");
+    api.getConfig = vi.fn().mockResolvedValue({
+      provider: "nebius",
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      reasoningEffort: "high",
+      maxRepairAttempts: 3,
+      grounding: { tavily: false },
+      lean: { mode: "cloud", projectConfigured: true },
+    });
+
+    render(<App api={api} pollIntervalMs={0} />);
+
+    expect(await screen.findByText("Nebius · NVIDIA Nemotron")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "手写图片" })).toBeDisabled();
+    expect(screen.getByText("Nemotron 生成 · Lean 验证 · 诊断驱动修复")).toBeInTheDocument();
+  });
+
+  it("shows Tavily mathlib grounding when the bonus integration is active", async () => {
+    const api = fakeApi("cloud");
+    api.getConfig = vi.fn().mockResolvedValue({
+      provider: "nebius",
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      reasoningEffort: "high",
+      maxRepairAttempts: 3,
+      grounding: { tavily: true },
+      lean: { mode: "cloud", projectConfigured: true },
+    });
+
+    render(<App api={api} pollIntervalMs={0} />);
+
+    expect(await screen.findByText("Tavily mathlib grounding")).toBeInTheDocument();
   });
 
   it("submits LaTeX and displays verified Lean", async () => {
@@ -114,7 +195,7 @@ describe("LeanBridge workbench", () => {
   it("uses the fixed Lean project and hides path controls in cloud mode", async () => {
     render(<App api={fakeApi("cloud")} pollIntervalMs={0} />);
 
-    expect(await screen.findByText("云端 Lean 已就绪")).toBeInTheDocument();
+    expect(await screen.findByText("云端 Lean 环境已配置")).toBeInTheDocument();
     expect(screen.getByText("云端使用固定的 Lean 4 / mathlib 环境")).toBeInTheDocument();
     expect(screen.queryByLabelText("Lean / mathlib 工程路径")).not.toBeInTheDocument();
   });

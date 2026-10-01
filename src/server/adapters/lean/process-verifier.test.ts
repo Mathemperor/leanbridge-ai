@@ -1,17 +1,33 @@
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import type { SpawnOptions } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { leanSubprocessEnvironment, ProcessLeanVerifier } from "./process-verifier";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeLean = resolve(here, "../../../../test/fixtures/fake-lean.mjs");
 let projectPath: string;
 
+// Windows cannot execute a shebang script directly. Only the test fixture is
+// launched through Node; the verifier still manages a real shell-free child.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn(command: string, args: string[], options: SpawnOptions) {
+      if (command === fakeLean) {
+        expect(options.shell).toBe(false);
+        return actual.spawn(process.execPath, [command, ...args], options);
+      }
+      return actual.spawn(command, args, options);
+    },
+  };
+});
+
 beforeAll(async () => {
   projectPath = await mkdtemp(resolve(tmpdir(), "leanbridge-project-"));
-  await chmod(fakeLean, 0o755);
 });
 
 afterAll(async () => {
@@ -26,12 +42,14 @@ describe("ProcessLeanVerifier", () => {
       OPENAI_API_KEY: "api-test-value",
       LEANBRIDGE_BACKEND_TOKEN: "token-test-value",
       LEANBRIDGE_SECRET_FILE: "/tmp/secret",
+      LEANBRIDGE_ACCESS_PASSWORD: "judge-password-value",
     });
 
     expect(env).toMatchObject({ PATH: "/usr/bin", HOME: "/home/leanbridge" });
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.LEANBRIDGE_BACKEND_TOKEN).toBeUndefined();
     expect(env.LEANBRIDGE_SECRET_FILE).toBeUndefined();
+    expect(env.LEANBRIDGE_ACCESS_PASSWORD).toBeUndefined();
   });
 
   it("verifies source through a shell-free executable", async () => {

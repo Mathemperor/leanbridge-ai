@@ -10,7 +10,9 @@ interface SourcePanelProps {
   projectPath: string;
   autoRepair: boolean;
   busy: boolean;
+  ready?: boolean;
   cloudMode: boolean;
+  imageSupported?: boolean;
   onModeChange(mode: ProofMode): void;
   onLatexChange(value: string): void;
   onImageChange(dataUrl: string, name: string): void;
@@ -86,6 +88,8 @@ export function SourcePanel(props: SourcePanelProps) {
             type="button"
             role="tab"
             aria-selected={props.mode === "image"}
+            disabled={props.imageSupported === false}
+            title={props.imageSupported === false ? "当前 Nebius 模型支持 LaTeX 和文字输入" : undefined}
             className={props.mode === "image" ? "active" : ""}
             onClick={() => props.onModeChange("image")}
           >
@@ -195,7 +199,7 @@ export function SourcePanel(props: SourcePanelProps) {
           </label>
         </div>
 
-        <button className="primary-button" type="submit" disabled={props.busy}>
+        <button className="primary-button" type="submit" disabled={props.busy || props.ready === false}>
           <span>{props.busy ? "形式化处理中" : "生成并验证"}</span>
           <span className="button-arrow" aria-hidden="true">→</span>
         </button>

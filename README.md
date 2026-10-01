@@ -1,25 +1,94 @@
 # LeanBridge AI
 
-LeanBridge AI 是一个本地优先的数学证明形式化工作台：输入手写证明图片或 LaTeX/自然语言证明，应用调用 OpenAI 把它转成 Lean 4，在真实 Lean/mathlib 工程中编译，并把编译错误反馈给模型进行有限次自动修复。
+**AI proposes the proof. Lean decides whether it is valid.**
 
-> 模型负责提出形式化证明，Lean 内核负责决定证明是否成立。
+LeanBridge AI is a proof-formalization workbench for turning informal mathematics into executable Lean 4 proofs. On the 2026 hackathon branch, **NVIDIA Nemotron runs through Nebius Token Factory** to generate Lean code and to repair failed proofs using exact compiler diagnostics from a real Lean/mathlib environment. An optional Tavily grounding step can search bounded Lean/mathlib references before the initial Nemotron call.
 
-## 已实现的能力
+This branch is being prepared for the **Nebius × NVIDIA Global AI Hackathon — Best Apps and Agents Track**. The [current rules](https://nebiusglobalaihackathon.devpost.com/rules) describe Token Factory Sandboxes for the coding track; LeanBridge currently runs its verifier in its own Docker environment, so the apps-and-agents track matches the implemented architecture.
 
-- PNG、JPEG、WebP 手写证明图片输入（最大 10 MiB）
-- LaTeX、中文或英文自然语言输入
-- OpenAI Responses API 多模态输入与结构化输出
-- 默认使用 `gpt-5.6`，推理强度默认为 `high`
-- 自动选择 `lake env lean` 或独立 `lean` 命令
-- 编译错误定位、超时与缺少 Lean 的明确诊断
-- 最多三轮自动修复（可配置为 0–5）
-- 手工编辑、重新验证、复制与下载 `.lean`
-- 不需要 API Key 或 Lean 的完整演示模式
-- API Key 只存在服务端，不进入浏览器构建产物
+## Why it matters
 
-## 快速体验
+LLMs can produce convincing mathematical text while still making subtle logical or formal mistakes. LeanBridge adds a deterministic correctness boundary:
 
-要求 Node.js 20.12 或更高版本。
+1. A user submits a natural-language or LaTeX proof.
+2. Optionally, Tavily retrieves bounded Lean/mathlib reference snippets from an allowlisted set of documentation/code domains.
+3. NVIDIA Nemotron generates a Lean 4 formalization through Nebius Token Factory.
+4. The backend compiles the result with real Lean 4 + mathlib.
+5. If compilation fails, LeanBridge sends bounded compiler diagnostics back to Nemotron.
+6. Nemotron repairs the proof within a configurable attempt budget.
+7. The UI preserves the generated Lean source, verification result, and repair trajectory.
+
+The language model is a proposer; the Lean kernel is the verifier.
+
+## Hackathon technology
+
+### Nebius Token Factory
+
+The dedicated adapter is in:
+
+`src/server/adapters/model/nebius-proof-model.ts`
+
+It makes runtime calls to the OpenAI-compatible Nebius Token Factory API for both initial proof generation and compiler-diagnostic repair.
+
+Default endpoint:
+
+```text
+https://api.tokenfactory.us-central1.nebius.com/v1/
+```
+
+### NVIDIA Nemotron
+
+Default hackathon model:
+
+```text
+nvidia/nemotron-3-super-120b-a12b
+```
+
+The active provider and model are exposed in the product UI so a judge can see when the live Nebius/Nemotron path is running.
+
+### Optional Tavily mathlib grounding
+
+The optional grounder lives in:
+
+`src/server/adapters/grounding/tavily-mathlib-grounder.ts`
+
+When enabled, LeanBridge makes one bounded `basic` Tavily Search API call before the initial Nemotron translation. The query is length-limited, results are capped, and returned context is restricted to approved Lean/mathlib sources. Retrieved text is explicitly marked as **untrusted reference material**: it may help Nemotron discover theorem/API names, but instructions embedded in retrieved content are ignored and the Lean compiler remains the correctness authority.
+
+If Tavily is temporarily unavailable, grounding fails open and the primary Nebius/Nemotron → Lean pipeline continues without search context.
+
+Enable it only on the Nebius text path:
+
+```dotenv
+TAVILY_GROUNDING_ENABLED=true
+TAVILY_API_KEY=your_server_side_tavily_key
+```
+
+### Lean 4 + mathlib
+
+The production Docker image pins Lean 4 and mathlib to `v4.24.0`. Generated code is compiled in an isolated temporary directory. The project rejects `sorry`, `admit`, and several compile-time execution escape hatches before verification.
+
+## Significant 2026 hackathon updates
+
+LeanBridge AI existed before the submission period. The hackathon branch adds substantial new work rather than presenting the pre-existing product as newly created:
+
+- dedicated Nebius Token Factory provider;
+- NVIDIA Nemotron as a runtime proof-generation and repair engine;
+- optional Tavily mathlib grounding with bounded, allowlisted retrieval;
+- provider-selectable architecture (`openai` or `nebius`);
+- Nebius and Tavily credential handling through the production one-time secret-file boundary;
+- UI visibility for the active Nebius/Nemotron runtime and Tavily grounding state;
+- provider/configuration/grounding/deployment regression tests;
+- hackathon-specific CI for tests, typechecking, and production builds;
+- submission and demo evidence documentation.
+
+See `docs/hackathon-nebius-nvidia-2026.md` for the dated upgrade log.
+
+## Quick start — deterministic demo mode
+
+Requirements:
+
+- Node.js **22.12 or newer**
+- npm
 
 ```bash
 npm install
@@ -27,78 +96,33 @@ cp .env.example .env
 npm run dev
 ```
 
-`.env.example` 默认启用 `DEMO_MODE=true`。打开终端显示的前端地址即可完整体验输入、生成、验证和编辑流程；演示模式使用确定性输出，不会调用外部 API，也不会启动 Lean。
+`.env.example` defaults to `DEMO_MODE=true`, which exercises the full UI without an external model API key or Lean installation. Demo mode is useful for UI development only; it does **not** satisfy the hackathon runtime requirement.
 
-生产构建：
+Production build:
 
 ```bash
 npm run build
 DEMO_MODE=true npm start
 ```
 
-应用默认监听 `http://localhost:4310`。
+The app listens on `http://localhost:4310` by default.
 
-## 云端生产后端
+## Run with Nebius Token Factory + real Lean
 
-仓库根目录的 `Dockerfile` 会构建固定的 Lean 4 `v4.24.0` 与 mathlib `v4.24.0` 环境；`lake-manifest.json` 进一步固定了 mathlib 与全部传递依赖的提交。容器以非 root 用户运行 LeanBridge。容器默认强制启用 `CLOUD_MODE=true` 和 `DEMO_MODE=false`；缺少 OpenAI Key、后端令牌或固定 Lean 工程时，服务会直接拒绝启动，不会退回演示模型。
-
-本机有 Docker 时，可以这样验证镜像：
-
-```bash
-cp .env.docker.example .env.docker
-# 在 .env.docker 中填写 OPENAI_API_KEY 和一个足够长的随机 LEANBRIDGE_BACKEND_TOKEN
-npm run docker:build
-npm run docker:smoke
-```
-
-另一个终端中检查公开存活状态与受保护的真实 Lean 就绪状态：
-
-```bash
-curl -fsS http://127.0.0.1:4310/api/health
-curl -fsS -H "Authorization: Bearer 你的后端令牌" http://127.0.0.1:4310/api/ready
-```
-
-`.env.docker` 已被 Git 忽略，绝不能把真实 Key 或后端令牌提交到仓库。
-
-### 部署到 Railway
-
-`railway.json` 已指定 Dockerfile 构建器和 `/api/health` 健康检查。将仓库连接到 Railway 后，只需在 Railway 服务变量中配置：
-
-```dotenv
-OPENAI_API_KEY=你的服务端_API_Key
-OPENAI_MODEL=gpt-5.6
-OPENAI_REASONING_EFFORT=high
-LEANBRIDGE_BACKEND_TOKEN=独立生成的高强度随机令牌
-```
-
-`CLOUD_MODE`、`DEMO_MODE` 与 `LEAN_PROJECT_PATH` 已由镜像设置，通常无需覆盖。Railway 分配的 `PORT` 会被服务自动读取。部署完成后先访问 `/api/health`，再携带 Bearer 令牌访问 `/api/ready`；后者会通过容器内的真实 Lean 内核编译一个探针定理。
-
-## 连接 OpenAI 与真实 Lean
-
-### 1. 准备 Lean/mathlib 工程
-
-Lean 官方推荐使用 VS Code 与 Lean 4 扩展完成安装，也可以通过 Elan 管理工具链：[Lean 安装指南](https://lean-lang.org/install/)、[Elan 工具链说明](https://lean-lang.org/doc/reference/latest/Build-Tools-and-Distribution/Managing-Toolchains-with-Elan/)。Lake 是 Lean 的标准构建工具，负责依赖与构建：[Lake 手册](https://lean-lang.org/doc/reference/latest/Build-Tools-and-Distribution/Lake/)。
-
-创建一个依赖 mathlib 的新工程时，可按 mathlib 社区当前指南执行：
-
-```bash
-lake +v4.24.0 new my_project math
-cd my_project
-lake update
-```
-
-指南中的版本用于保证 `lake` 足够新，项目最终采用的 Lean 版本由生成的 `lean-toolchain` 决定。完整说明见 [Creating a Lean project](https://leanprover-community.github.io/install/project.html)。已有工程可以直接使用。
-
-### 2. 配置应用
-
-复制 `.env.example` 为 `.env` 并修改：
+Create `.env` from `.env.example` and set:
 
 ```dotenv
 DEMO_MODE=false
-OPENAI_API_KEY=你的服务端_API_Key
-OPENAI_MODEL=gpt-5.6
-OPENAI_REASONING_EFFORT=high
-LEAN_PROJECT_PATH=/绝对路径/my_project
+MODEL_PROVIDER=nebius
+NEBIUS_API_KEY=your_server_side_token_factory_key
+NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
+NEBIUS_BASE_URL=https://api.tokenfactory.us-central1.nebius.com/v1/
+
+# Optional Tavily grounding
+TAVILY_GROUNDING_ENABLED=true
+TAVILY_API_KEY=your_server_side_tavily_key
+
+LEAN_PROJECT_PATH=/absolute/path/to/a/mathlib/project
 LEAN_COMMAND=lean
 LAKE_COMMAND=lake
 LEAN_TIMEOUT_MS=30000
@@ -106,80 +130,138 @@ MAX_REPAIR_ATTEMPTS=3
 PORT=4310
 ```
 
-启动：
+Then run:
 
 ```bash
 npm run dev
 ```
 
-也可以不设置 `LEAN_PROJECT_PATH`，在界面的“Lean / mathlib 工程路径”中为单次任务指定工程。
+The current default Nemotron route is text-only. Handwritten-image input remains available through the existing OpenAI provider until a compatible NVIDIA vision route is added.
 
-## 工作流程
+## Docker / cloud deployment
 
-1. 浏览器仅提交证明文本或图片，不接触 API Key。
-2. 服务端使用 Responses API：图片作为 `input_image`，文字作为 `input_text`。
-3. 模型按结构化 schema 返回转录、定理摘要、假设、imports、Lean 源码与说明。
-4. 本地守卫拒绝包含 `sorry` 或 `admit` 的结果。
-5. 服务端把源码写入独立临时目录，以参数数组启动 `lake env lean Main.lean`；没有 Lake 工程标记时改用 `lean Main.lean`。
-6. 验证失败时，完整但有长度上限的 Lean 诊断会返回给模型修复。
-7. 验证成功、禁用自动修复或达到修复上限后停止；最后一次源码与所有尝试记录都会保留。
+The root `Dockerfile` builds a non-root production image containing pinned Lean 4 and mathlib. Cloud mode refuses to start if required credentials, the backend token, or the fixed Lean project are missing.
 
-OpenAI 的实现依据当前官方文档：Responses API 适合推理及多轮工作流，[GPT-5.6 模型指南](https://developers.openai.com/api/docs/guides/latest-model)；图片可以通过 Responses API 作为 Base64 data URL 输入，[Images and vision](https://developers.openai.com/api/docs/guides/images-vision)；输出通过 SDK 的结构化输出解析，[Structured model outputs](https://developers.openai.com/api/docs/guides/structured-outputs)。
+Example environment for the Nebius-backed container:
 
-## 常用命令
+```dotenv
+MODEL_PROVIDER=nebius
+NEBIUS_API_KEY=your_server_side_token_factory_key
+NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
+TAVILY_GROUNDING_ENABLED=false
+LEANBRIDGE_BACKEND_TOKEN=generate_a_long_random_backend_secret
+LEANBRIDGE_ACCESS_PASSWORD=generate_a_different_random_browser_password
+```
+
+Build and smoke-test locally:
 
 ```bash
-npm run dev        # 同时启动前端与服务端
-npm test           # 运行全部自动化测试
-npm run typecheck  # 严格 TypeScript 检查
-npm run build      # 生成 dist/client 与 dist/server
-npm start          # 运行生产构建
-npm run docker:build # 构建包含 Lean/mathlib 的生产镜像
-npm run docker:smoke # 使用 .env.docker 启动生产镜像
+cp .env.docker.example .env.docker
+# fill in the server-side secrets in .env.docker
+npm run docker:build
+npm run docker:smoke
 ```
 
-## 故障排查
+Open the workbench and enter the separate browser access password. API keys and the backend token stay on the server. Remote use requires HTTPS; loopback HTTP works for local testing. See [browser access and shared judge-workbench limitations](docs/browser-access.md).
 
-### `Lean executable not found`
+On Windows, `START_FIXED_PREFLIGHT_V2.bat` launches the independent PowerShell script and pauses on success or failure. Its default target is the owner's downloaded repository. From a different checkout, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\leanbridge_preflight_v2.ps1 -RepoPath .` instead. The script reads local `.env`, generates `.env.docker`, builds the container, and checks health and authenticated Lean readiness. It does not make model or Tavily calls.
 
-先在同一个终端运行 `lean --version` 和 `lake --version`。如果命令只在特定路径可用，可设置 `LEAN_COMMAND`、`LAKE_COMMAND` 为绝对路径；使用 Elan 后可能需要重新打开终端。
+Public health check:
 
-### `unknown package 'Mathlib'`
+```bash
+curl -fsS http://127.0.0.1:4310/api/health
+```
 
-`LEAN_PROJECT_PATH` 必须指向含 `lakefile.lean`、`lakefile.toml` 或 `lakefile` 的 mathlib 工程根目录，并先在该目录运行 `lake update`。
+Authenticated Lean readiness probe:
 
-### 验证超时
+```bash
+curl -fsS \
+  -H "Authorization: Bearer YOUR_BACKEND_TOKEN" \
+  http://127.0.0.1:4310/api/ready
+```
 
-提高 `LEAN_TIMEOUT_MS`。默认 30 秒，上限 300 秒。首次下载或构建 mathlib 不应由本应用触发，应先在工程中完成依赖安装。
+`railway.json` is configured to build the Dockerfile and use `/api/health` as the service health endpoint.
 
-### AI 返回的定理与原证明不完全一致
-
-在输入中明确写出变量类型、量词、定义域、隐含前提和目标定理。手写图可在“补充背景”中说明符号含义。即使 Lean 验证通过，也只说明生成的 Lean 定理被证明；语义是否忠实仍需要人审查。
-
-## 安全边界
-
-- 服务端调用子进程时固定 `shell: false`，用户路径不会拼接成 shell 命令。
-- Docker 入口把 OpenAI Key 与后端令牌转移到启动期一次性文件，Node 读取后立即删除；Lean 子进程只接收 PATH、HOME、Elan 等白名单环境变量。
-- 生产镜像中的应用、Lean 工具链与 mathlib 工程归 root 所有且只读，Lean 只能写入独立临时目录。
-- 源码守卫除 `sorry` / `admit` 外，也拒绝 `#eval`、`run_cmd`、`run_tac`、`initialize`、自定义宏/语法/elaborator、外部函数与新公理等编译期执行入口。
-- 编译在应用拥有的临时文件中进行，不覆盖工程文件。
-- 请求体、图片、编译输出、超时和修复次数都有上限。
-- 云端后端需要独立 Bearer 令牌，除 `/api/health` 外的 API 均受保护；Sites 代理在服务端添加该令牌，浏览器不会接触它。
-- 云端拒绝客户端指定 Lean 工程路径，并把 Lean 验证串行化，适合首个 owner-only 版本。
-- 内存任务存储最多保留 8 个任务；手写图片在模型完成识别后立即从任务存储释放，终态任务会按容量和 TTL 淘汰。
-- 当前仍不是多租户沙箱，也使用内存任务存储。扩大访问范围前，需要为每个 Lean 任务增加一次性容器或 microVM、限流和持久化队列。
-
-## 项目结构
+## Verification loop
 
 ```text
-src/client/                 React 工作台
-src/server/adapters/model/  OpenAI 与演示模型适配器
-src/server/adapters/lean/   Lean 子进程与演示验证器
-src/server/domain/          状态机、端口、内存任务存储
-src/shared/                 客户端/服务端共享 schema 与类型
-test/fixtures/              确定性假 Lean 可执行文件
-docs/                       设计、架构与实施计划
-lean-project/               固定 Lean 4.24.0 / mathlib 4.24.0 工程
+Informal proof
+    ↓
+optional Tavily Lean/mathlib grounding
+    ↓
+Nebius Token Factory / NVIDIA Nemotron
+    ↓
+Lean 4 source
+    ↓
+real Lean + mathlib compiler
+    ├── success → verified proof
+    └── failure → bounded diagnostics → Nemotron repair → compile again
 ```
 
-更详细的数据流和扩展边界见 [docs/architecture.md](docs/architecture.md)。
+Manual edits can be re-verified without making another model call.
+
+## Security boundaries
+
+- Provider and grounding API keys remain server-side and are never included in the browser bundle.
+- Docker startup moves OpenAI, Nebius, Tavily, and backend credentials into a temporary secret file, unsets the raw environment variables, and removes the file after Node reads it.
+- Tavily queries, result counts, per-result text, total returned context, and accepted result domains are bounded.
+- Retrieved Tavily text is treated as untrusted reference material and is never an authority over the Lean compiler.
+- Lean subprocesses receive an allowlisted environment rather than inheriting model credentials.
+- Child processes are invoked with `shell: false`.
+- Generated Lean is written to application-owned temporary directories instead of overwriting the mathlib project.
+- Source, image, compiler-output, timeout, and repair-attempt sizes are bounded.
+- Each Nebius call has a 90-second deadline, no automatic SDK retries, and an 8,192-token completion budget that includes reasoning. A truncated response is reported as a token-limit failure instead of being accepted as a completed translation.
+- Automatic model repair runs for compiler rejection; a compiler timeout or missing Lean environment preserves the original result without making another inference call.
+- Cloud mode rejects client-selected Lean project paths.
+- The current deployment is owner-oriented and uses an in-memory job store; it is not presented as a hardened public multi-tenant sandbox.
+
+## Test and build
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+The hackathon branch also runs these checks in `.github/workflows/hackathon-ci.yml`.
+
+On memory-constrained Windows hosts, run tests serially with `npm test -- --maxWorkers=1 --no-file-parallelism`. Cold mathlib imports can be slow on a disk-backed WSL installation: if the compiler times out, adjust the server's `LEAN_TIMEOUT_MS` within its 1,000–300,000 ms range and restart the container. A local 1.5 GiB WSL test took about 105 seconds for a cold `Mathlib.Data.Nat.Basic` import, so this setup uses `LEAN_TIMEOUT_MS=180000`. A timeout is not a proof rejection and is never reported as verification success.
+
+## Project structure
+
+```text
+src/client/                          React workbench
+src/server/adapters/model/           OpenAI, Nebius/Nemotron, and demo model adapters
+src/server/adapters/grounding/       optional Tavily Lean/mathlib grounding
+src/server/adapters/lean/            Lean process verifier and diagnostics
+src/server/domain/                   proof pipeline, job state, safety boundaries
+src/shared/                          shared schemas and types
+lean-project/                        pinned Lean 4 / mathlib project
+docs/hackathon-nebius-nvidia-2026.md submission-period upgrade log
+```
+
+## Hackathon demo narrative
+
+A strong demo uses a proof that does not succeed immediately:
+
+1. show the UI reporting `Nebius · NVIDIA Nemotron` and, when enabled, `Tavily mathlib grounding`;
+2. submit a natural-language or LaTeX proof;
+3. show Nemotron's generated Lean code;
+4. show the real compiler reject an imperfect attempt;
+5. show the exact Lean diagnostic appear in the verification trajectory;
+6. show Nemotron repair the code;
+7. finish on a kernel-verified proof and the recorded attempt history.
+
+This makes the agentic loop visible rather than presenting a single opaque LLM answer.
+
+## Current limitations
+
+- The default Nemotron route accepts text input, not handwritten images.
+- Tavily grounding currently runs before the initial translation; repair attempts rely on the generated Lean plus exact compiler diagnostics rather than making another search call.
+- Kernel verification proves the generated Lean theorem, not necessarily semantic faithfulness to an ambiguous informal statement.
+- The current cloud architecture is not yet a general-purpose untrusted-code sandbox for public multi-tenancy.
+- Live Nebius/Tavily credentials and a hosted demo are still required before those external runtime paths can be claimed as deployment-verified.
+
+## License
+
+MIT. See `LICENSE`.

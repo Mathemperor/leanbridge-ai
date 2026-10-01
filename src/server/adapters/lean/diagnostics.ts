@@ -1,6 +1,6 @@
 import type { DiagnosticSeverity, LeanDiagnostic } from "@shared/proof";
 
-const headerPattern = /^.*?:(\d+):(\d+):\s*(error|warning|information|info):\s*(.*)$/i;
+const headerPattern = /^.*?:(\d+):(\d+):\s*(error|warning|information|info)(?:\([^\r\n)]*\))?:\s*(.*)$/i;
 const MAX_DIAGNOSTICS = 256;
 
 function severityOf(value: string): DiagnosticSeverity {

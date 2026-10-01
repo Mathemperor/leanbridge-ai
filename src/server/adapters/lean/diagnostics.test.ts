@@ -24,6 +24,31 @@ describe("parseLeanOutput", () => {
     expect(diagnostics.map(({ severity }) => severity)).toEqual(["warning", "info"]);
   });
 
+  it("retains named Lean diagnostics before an ordinary error", () => {
+    const diagnostics = parseLeanOutput([
+      "Main.lean:4:6: error(lean.unknownIdentifier): Unknown identifier `add_comm`",
+      "Main.lean:3:50: error: unsolved goals",
+      "a b : ℕ",
+      "⊢ a + b = b + a",
+    ].join("\n"));
+
+    expect(diagnostics).toEqual([
+      { line: 4, column: 6, severity: "error", message: "Unknown identifier `add_comm`" },
+      { line: 3, column: 50, severity: "error", message: "unsolved goals\na b : ℕ\n⊢ a + b = b + a" },
+    ]);
+  });
+
+  it("separates named warnings from preceding multiline errors", () => {
+    expect(parseLeanOutput([
+      "C:\\proofs\\Main.lean:3:1: error: unsolved goals",
+      "⊢ False",
+      "C:\\proofs\\Main.lean:5:2: warning(linter.unusedVariables): unused variable `n`",
+    ].join("\r\n"))).toEqual([
+      { line: 3, column: 1, severity: "error", message: "unsolved goals\n⊢ False" },
+      { line: 5, column: 2, severity: "warning", message: "unused variable `n`" },
+    ]);
+  });
+
   it("returns a general error when output has no location header", () => {
     expect(parseLeanOutput("lean process failed")).toEqual([
       { severity: "error", message: "lean process failed" },

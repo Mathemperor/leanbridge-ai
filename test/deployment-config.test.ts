@@ -34,8 +34,10 @@ describe("cloud deployment configuration", () => {
     expect(dockerfile).toMatch(/COPY\s+--chmod=0555\s+--from=lean-environment\s+\/app\/lean-project\s+\.\/lean-project/);
     expect(dockerfile).not.toContain("lake update");
     expect(dockerfile).not.toMatch(/OPENAI_API_KEY\s*=/);
+    expect(dockerfile).not.toMatch(/NEBIUS_API_KEY\s*=/);
+    expect(dockerfile).not.toMatch(/TAVILY_API_KEY\s*=/);
     expect(dockerfile).not.toMatch(/LEANBRIDGE_BACKEND_TOKEN\s*=/);
-    expect(entrypoint).toContain("unset OPENAI_API_KEY LEANBRIDGE_BACKEND_TOKEN");
+    expect(entrypoint).toContain("unset OPENAI_API_KEY NEBIUS_API_KEY TAVILY_API_KEY LEANBRIDGE_BACKEND_TOKEN");
     expect(entrypoint).toContain("/tmp/leanbridge-secrets.*");
     expect(entrypoint).toContain("exec \"$@\"");
   });

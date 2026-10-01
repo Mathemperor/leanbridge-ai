@@ -12,8 +12,13 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-printf '%s\0%s\0' "${OPENAI_API_KEY:-}" "${LEANBRIDGE_BACKEND_TOKEN:-}" > "$secret_file"
-unset OPENAI_API_KEY LEANBRIDGE_BACKEND_TOKEN
+printf '%s\0%s\0%s\0%s\0%s\0' \
+  "${OPENAI_API_KEY:-}" \
+  "${NEBIUS_API_KEY:-}" \
+  "${TAVILY_API_KEY:-}" \
+  "${LEANBRIDGE_BACKEND_TOKEN:-}" \
+  "${LEANBRIDGE_ACCESS_PASSWORD:-}" > "$secret_file"
+unset OPENAI_API_KEY NEBIUS_API_KEY TAVILY_API_KEY LEANBRIDGE_BACKEND_TOKEN LEANBRIDGE_ACCESS_PASSWORD
 export LEANBRIDGE_SECRET_FILE="$secret_file"
 
 exec "$@"

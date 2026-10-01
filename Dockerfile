@@ -23,11 +23,34 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://elan.lean-lang.org/elan-init.sh
 
 WORKDIR /app
 COPY lean-project ./lean-project
-RUN cd lean-project \
-  && lake exe cache get \
-  && lake env lean LeanBridge/Basic.lean \
-  && lake env printenv LEAN_PATH > .lean-path \
-  && elan which lean > .lean-bin
+# Elan installs the pinned toolchain lazily. Cache that download in its own layer.
+RUN set -eu; \
+  cd lean-project; \
+  attempt=1; \
+  until lake --version; do \
+    if [ "$attempt" -ge 5 ]; then exit 1; fi; \
+    sleep 10; \
+    attempt=$((attempt + 1)); \
+  done
+
+RUN set -eu; \
+  export LEAN_NUM_THREADS=2 RAYON_NUM_THREADS=2 CURL_HOME=/tmp/leanbridge-curl; \
+  mkdir -p "$CURL_HOME"; \
+  printf '%s\n' 'parallel-max = 4' 'retry = 5' 'retry-all-errors' 'connect-timeout = 20' > "$CURL_HOME/.curlrc"; \
+  cd lean-project; \
+  attempt=1; \
+  until lake -v exe cache get; do \
+    if [ "$attempt" -ge 5 ]; then \
+      echo "Lean dependency/cache download failed after 5 attempts." >&2; \
+      exit 1; \
+    fi; \
+    echo "Retrying Lean dependency/cache download in 10 seconds (attempt $attempt of 5)."; \
+    sleep 10; \
+    attempt=$((attempt + 1)); \
+  done; \
+  lake env lean -j2 LeanBridge/Basic.lean; \
+  lake env printenv LEAN_PATH > .lean-path; \
+  elan which lean > .lean-bin
 
 FROM node:22-bookworm-slim AS runtime
 

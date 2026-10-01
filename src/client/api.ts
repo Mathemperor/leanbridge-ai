@@ -1,10 +1,13 @@
 import type { ProofJob, ProofRequest } from "@shared/proof";
 
 export interface ClientRuntimeConfig {
-  provider: "demo" | "openai";
+  provider: "demo" | "openai" | "nebius";
   model: string;
   reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   maxRepairAttempts: number;
+  grounding: {
+    tavily: boolean;
+  };
   lean: {
     mode: "demo" | "local" | "cloud";
     projectConfigured: boolean;
@@ -18,13 +21,17 @@ export interface LeanBridgeApi {
   reverify(id: string, code: string): Promise<ProofJob>;
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-LeanBridge-Request": "browser", ...init?.headers },
   });
   const body = await response.json() as { error?: string } & T;
-  if (!response.ok) throw new Error(body.error ?? `请求失败（${response.status}）`);
+  if (!response.ok) {
+    if (response.status === 401 && path !== "/api/session") window.dispatchEvent(new Event("leanbridge:session-expired"));
+    throw new Error(body.error ?? `请求失败（${response.status}）`);
+  }
   return body;
 }
 
