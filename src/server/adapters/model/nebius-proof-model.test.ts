@@ -43,7 +43,7 @@ describe("NebiusProofModel", () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       model: "nvidia/nemotron-3-super-120b-a12b",
       response_format: { type: "json_object" },
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [
         expect.objectContaining({ role: "system" }),
         expect.objectContaining({
@@ -119,6 +119,15 @@ describe("NebiusProofModel", () => {
 
     await expect(model.translate({ mode: "latex", latex: "n=n", autoRepair: true }))
       .rejects.toThrow(/structured translation/i);
+  });
+
+  it.each([null, JSON.stringify(baseTranslation)])("rejects exhausted output even when content is %s", async (content) => {
+    const { model, create } = createHarness();
+    create.mockResolvedValue({ choices: [{ finish_reason: "length", message: { content } }] });
+
+    await expect(model.translate({ mode: "latex", latex: "n=n", autoRepair: true }))
+      .rejects.toMatchObject({ code: "model_output_limit", message: expect.stringMatching(/token limit/i) });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("rejects image input for the default text-only Nemotron model", async () => {

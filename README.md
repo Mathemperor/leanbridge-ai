@@ -210,6 +210,8 @@ Manual edits can be re-verified without making another model call.
 - Child processes are invoked with `shell: false`.
 - Generated Lean is written to application-owned temporary directories instead of overwriting the mathlib project.
 - Source, image, compiler-output, timeout, and repair-attempt sizes are bounded.
+- Each Nebius call has a 90-second deadline, no automatic SDK retries, and an 8,192-token completion budget that includes reasoning. A truncated response is reported as a token-limit failure instead of being accepted as a completed translation.
+- Automatic model repair runs for compiler rejection; a compiler timeout or missing Lean environment preserves the original result without making another inference call.
 - Cloud mode rejects client-selected Lean project paths.
 - The current deployment is owner-oriented and uses an in-memory job store; it is not presented as a hardened public multi-tenant sandbox.
 
@@ -222,6 +224,8 @@ npm run build
 ```
 
 The hackathon branch also runs these checks in `.github/workflows/hackathon-ci.yml`.
+
+On memory-constrained Windows hosts, run tests serially with `npm test -- --maxWorkers=1 --no-file-parallelism`. Cold mathlib imports can be slow on a disk-backed WSL installation: if the compiler times out, adjust the server's `LEAN_TIMEOUT_MS` within its 1,000–300,000 ms range and restart the container. A local 1.5 GiB WSL test took about 105 seconds for a cold `Mathlib.Data.Nat.Basic` import, so this setup uses `LEAN_TIMEOUT_MS=180000`. A timeout is not a proof rejection and is never reported as verification success.
 
 ## Project structure
 

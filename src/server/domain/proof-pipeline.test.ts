@@ -137,6 +137,18 @@ describe("ProofPipeline", () => {
     expect(model.repairs).toHaveLength(0);
   });
 
+  it.each(["timeout", "missing"] as const)("preserves a %s result without spending model calls on an infrastructure failure", async (status) => {
+    const result = { ...failed, status, output: `Lean ${status}` };
+    const { pipeline, model, verifier } = harness([result]);
+    const job = pipeline.start(source);
+
+    await pipeline.run(job.id);
+
+    expect(pipeline.get(job.id)).toMatchObject({ status: "failed", verification: result, translation: initial });
+    expect(model.repairs).toHaveLength(0);
+    expect(verifier.calls).toHaveLength(1);
+  });
+
   it("records a redacted structured provider failure", async () => {
     const { pipeline, model } = harness([]);
     model.failure = Object.assign(
