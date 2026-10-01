@@ -76,7 +76,7 @@ export class ProofPipeline {
           this.#store.finish(id, "verified");
           return;
         }
-        if (!request.autoRepair || repairs >= this.#maxRepairAttempts) {
+        if (verification.status !== "failed" || !request.autoRepair || repairs >= this.#maxRepairAttempts) {
           this.#store.finish(id, "failed");
           return;
         }

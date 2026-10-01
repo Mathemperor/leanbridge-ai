@@ -8,7 +8,9 @@ LeanBridge AI — Kernel-Verified Mathematical Proof Agent
 
 ## Track
 
-Coding and Agentic Engineering
+Best Apps and Agents
+
+Track selection follows the [official rules checked on September 27, 2026](https://nebiusglobalaihackathon.devpost.com/rules). LeanBridge uses a Nemotron proof agent through Token Factory with its own Docker-based Lean verifier. It does not currently use the Token Factory Sandboxes described for the coding track.
 
 ## One-line pitch
 
@@ -135,7 +137,7 @@ Do not submit until all of these are true:
 
 - the live project makes a confirmed Nebius Token Factory runtime call;
 - if the Tavily bonus is claimed, the submitted build makes a confirmed functional Tavily API runtime call;
-- the public demo URL loads without private account access restrictions;
+- the demo/test-build URL loads and judges have any required private access instructions;
 - the UI correctly reports Nebius/Nemotron when the live path is active;
 - the UI correctly reports Tavily grounding if that integration is enabled in the submitted demo;
 - at least one proof is shown being checked by real Lean/mathlib;

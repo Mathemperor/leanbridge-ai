@@ -74,9 +74,12 @@ The production container expects a strong backend bearer token in addition to pr
 
 ```dotenv
 LEANBRIDGE_BACKEND_TOKEN=<generate privately in deployment secret storage>
+LEANBRIDGE_ACCESS_PASSWORD=<separate random password for owner and invited judges>
 ```
 
 Do not reuse a provider key, personal password, bank-related credential, or GitHub token as the backend token.
+
+The browser now has a built-in sign-in page using the separate access password and an expiring HttpOnly cookie. Deploy the frontend and API at the same HTTPS origin. See `docs/browser-access.md`. Provide judge credentials privately where the competition allows test access; do not put credentials in public code or videos.
 
 The Docker image already pins the Lean/mathlib project and cloud-mode settings. Do not override the project path with a user-controlled directory in the public demo.
 
@@ -190,7 +193,7 @@ Before changing the repository to public or submitting on Devpost, verify all of
 - if the Tavily bonus is claimed, a real functional Tavily API call succeeds in the submitted solution;
 - any repair cycle shown in the video genuinely occurred;
 - the repository contains no secrets;
-- the public demo does not require viewers to know a private credential;
+- the demonstration/test build is reachable by judges, with any required access password supplied through private judge-access instructions;
 - the final video is public and no longer than three minutes;
 - the submission discloses that LeanBridge existed before the hackathon and identifies the substantial hackathon-period work.
 

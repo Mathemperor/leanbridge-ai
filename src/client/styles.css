@@ -17,6 +17,17 @@
 }
 
 * { box-sizing: border-box; }
+.access-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.access-card { width: min(100%, 480px); padding: 36px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 20px 65px #1720330d; }
+.access-card h1 { font: 500 30px/1.4 Georgia, serif; }
+.access-card h1 small { font-size: 21px; color: var(--muted); }
+.access-card form { display: grid; gap: 16px; }
+.access-card p, .access-card small { color: var(--muted); line-height: 1.65; }
+.access-card label { font-size: 14px; font-weight: 600; }
+.access-card input { width: 100%; border: 1px solid var(--line); padding: 12px; border-radius: 8px; background: white; }
+.access-error { color: var(--red) !important; padding: 12px; background: #fff0f2; }
+.session-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 24px; background: var(--ink); color: white; font-size: 12px; }
+.session-bar button { color: white; background: transparent; border: 1px solid #ffffff66; border-radius: 5px; padding: 5px 10px; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background:
   radial-gradient(circle at 8% 0%, rgba(70, 86, 216, 0.09), transparent 28rem),

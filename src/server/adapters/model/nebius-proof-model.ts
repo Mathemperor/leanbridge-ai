@@ -13,6 +13,7 @@ export interface NebiusProofModelConfig {
 
 interface ChatCompletionResponse {
   choices: Array<{
+    finish_reason?: string;
     message: {
       content: string | null;
     };
@@ -48,6 +49,8 @@ export class NebiusProofModel implements ProofModel {
     this.#client = client ?? (new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
+      timeout: 90_000,
+      maxRetries: 0,
     }) as unknown as ChatClient);
     this.#grounder = grounder;
   }
@@ -89,9 +92,17 @@ export class NebiusProofModel implements ProofModel {
       model: this.#config.model,
       messages,
       response_format: { type: "json_object" },
+      // Nemotron's completion budget includes reasoning as well as final JSON.
+      max_tokens: 8192,
     });
 
-    const content = response.choices[0]?.message.content;
+    const choice = response.choices[0];
+    if (choice?.finish_reason === "length") {
+      throw Object.assign(new Error("The model reached its token limit before completing the proof. Try a smaller statement."), {
+        code: "model_output_limit",
+      });
+    }
+    const content = choice?.message.content;
     if (!content) {
       throw new Error("The model returned no structured translation");
     }

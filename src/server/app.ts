@@ -7,7 +7,7 @@ import type { ProofPipeline } from "./domain/proof-pipeline";
 import type { LeanVerifier, VerifyOptions } from "./domain/ports";
 import { JobStoreCapacityError } from "./domain/job-store";
 import type { PublicRuntimeConfig } from "./config";
-import { backendAuth } from "./backend-auth";
+import { browserAccess } from "./browser-access";
 
 const manualVerificationSchema = z.object({
   code: z.string().trim().min(1, "Lean 代码不能为空").max(200_000),
@@ -18,6 +18,7 @@ export interface CreateAppOptions {
   publicConfig: PublicRuntimeConfig;
   clientDirectory?: string;
   backendToken?: string;
+  accessPassword?: string;
   cloudMode?: boolean;
   readinessVerifier?: LeanVerifier;
   readinessOptions?: VerifyOptions;
@@ -32,7 +33,7 @@ export function createApp(options: CreateAppOptions): Express {
     response.json({ ok: true, service: "leanbridge", timestamp: new Date().toISOString() });
   });
 
-  if (options.backendToken) app.use("/api", backendAuth(options.backendToken));
+  app.use("/api", browserAccess(options));
 
   if (options.readinessVerifier) {
     app.get("/api/ready", async (_request, response) => {

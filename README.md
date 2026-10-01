@@ -4,7 +4,7 @@
 
 LeanBridge AI is a proof-formalization workbench for turning informal mathematics into executable Lean 4 proofs. On the 2026 hackathon branch, **NVIDIA Nemotron runs through Nebius Token Factory** to generate Lean code and to repair failed proofs using exact compiler diagnostics from a real Lean/mathlib environment. An optional Tavily grounding step can search bounded Lean/mathlib references before the initial Nemotron call.
 
-This branch is being prepared for the **Nebius × NVIDIA Global AI Hackathon — Coding and Agentic Engineering Track**.
+This branch is being prepared for the **Nebius × NVIDIA Global AI Hackathon — Best Apps and Agents Track**. The [current rules](https://nebiusglobalaihackathon.devpost.com/rules) describe Token Factory Sandboxes for the coding track; LeanBridge currently runs its verifier in its own Docker environment, so the apps-and-agents track matches the implemented architecture.
 
 ## Why it matters
 
@@ -148,9 +148,9 @@ Example environment for the Nebius-backed container:
 MODEL_PROVIDER=nebius
 NEBIUS_API_KEY=your_server_side_token_factory_key
 NEBIUS_MODEL=nvidia/nemotron-3-super-120b-a12b
-TAVILY_GROUNDING_ENABLED=true
-TAVILY_API_KEY=your_server_side_tavily_key
-LEANBRIDGE_BACKEND_TOKEN=generate_a_long_random_secret
+TAVILY_GROUNDING_ENABLED=false
+LEANBRIDGE_BACKEND_TOKEN=generate_a_long_random_backend_secret
+LEANBRIDGE_ACCESS_PASSWORD=generate_a_different_random_browser_password
 ```
 
 Build and smoke-test locally:
@@ -161,6 +161,10 @@ cp .env.docker.example .env.docker
 npm run docker:build
 npm run docker:smoke
 ```
+
+Open the workbench and enter the separate browser access password. API keys and the backend token stay on the server. Remote use requires HTTPS; loopback HTTP works for local testing. See [browser access and shared judge-workbench limitations](docs/browser-access.md).
+
+On Windows, `START_FIXED_PREFLIGHT_V2.bat` launches the independent PowerShell script and pauses on success or failure. Its default target is the owner's downloaded repository. From a different checkout, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\leanbridge_preflight_v2.ps1 -RepoPath .` instead. The script reads local `.env`, generates `.env.docker`, builds the container, and checks health and authenticated Lean readiness. It does not make model or Tavily calls.
 
 Public health check:
 
@@ -206,6 +210,8 @@ Manual edits can be re-verified without making another model call.
 - Child processes are invoked with `shell: false`.
 - Generated Lean is written to application-owned temporary directories instead of overwriting the mathlib project.
 - Source, image, compiler-output, timeout, and repair-attempt sizes are bounded.
+- Each Nebius call has a 90-second deadline, no automatic SDK retries, and an 8,192-token completion budget that includes reasoning. A truncated response is reported as a token-limit failure instead of being accepted as a completed translation.
+- Automatic model repair runs for compiler rejection; a compiler timeout or missing Lean environment preserves the original result without making another inference call.
 - Cloud mode rejects client-selected Lean project paths.
 - The current deployment is owner-oriented and uses an in-memory job store; it is not presented as a hardened public multi-tenant sandbox.
 
@@ -218,6 +224,8 @@ npm run build
 ```
 
 The hackathon branch also runs these checks in `.github/workflows/hackathon-ci.yml`.
+
+On memory-constrained Windows hosts, run tests serially with `npm test -- --maxWorkers=1 --no-file-parallelism`. Cold mathlib imports can be slow on a disk-backed WSL installation: if the compiler times out, adjust the server's `LEAN_TIMEOUT_MS` within its 1,000–300,000 ms range and restart the container. A local 1.5 GiB WSL test took about 105 seconds for a cold `Mathlib.Data.Nat.Basic` import, so this setup uses `LEAN_TIMEOUT_MS=180000`. A timeout is not a proof rejection and is never reported as verification success.
 
 ## Project structure
 

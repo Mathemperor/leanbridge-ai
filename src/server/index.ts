@@ -48,6 +48,7 @@ const app = createApp({
   publicConfig: toPublicConfig(config),
   clientDirectory: resolve(process.cwd(), "dist/client"),
   ...(config.backendToken ? { backendToken: config.backendToken } : {}),
+  ...(config.accessPassword ? { accessPassword: config.accessPassword } : {}),
   cloudMode: config.cloudMode,
   ...(config.demoMode
     ? {}

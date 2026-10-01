@@ -26,6 +26,7 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [pollFailures, setPollFailures] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -36,25 +37,30 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
   }, [api]);
 
   useEffect(() => {
-    if (!job || terminalStatuses.has(job.status)) return;
+    if (!job || terminalStatuses.has(job.status) || pollFailures >= 3) return;
     let active = true;
     const timer = window.setTimeout(() => {
       void api.getProof(job.id)
-        .then((next) => { if (active) setJob(next); })
+        .then((next) => {
+          if (!active) return;
+          setJob(next);
+          setPollFailures(0);
+          setError("");
+          if (next.translation?.leanCode) setCode(next.translation.leanCode);
+          if (terminalStatuses.has(next.status)) setSubmitting(false);
+        })
         .catch((reason: unknown) => {
-          if (active) setError(reason instanceof Error ? reason.message : "无法更新任务状态");
+          if (!active) return;
+          setPollFailures((count) => count + 1);
+          setError(reason instanceof Error ? reason.message : "无法更新任务状态");
+          if (pollFailures >= 2) setSubmitting(false);
         });
     }, pollIntervalMs);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, job, pollIntervalMs]);
-
-  useEffect(() => {
-    if (job?.translation?.leanCode) setCode(job.translation.leanCode);
-    if (job && terminalStatuses.has(job.status)) setSubmitting(false);
-  }, [job]);
+  }, [api, job, pollIntervalMs, pollFailures]);
 
   const submit = async () => {
     setError("");
@@ -76,9 +82,12 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
       ? { mode, latex: latex.trim(), ...common }
       : { mode, imageDataUrl, ...(context.trim() ? { context: context.trim() } : {}), ...common };
     setSubmitting(true);
-    setCode("");
     try {
-      setJob(await api.createProof(request));
+      const created = await api.createProof(request);
+      setJob(created);
+      setCode(created.translation?.leanCode ?? "");
+      setPollFailures(0);
+      if (terminalStatuses.has(created.status)) setSubmitting(false);
     } catch (reason) {
       setSubmitting(false);
       setError(reason instanceof Error ? reason.message : "无法创建证明任务");
@@ -90,7 +99,9 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
     setError("");
     setSubmitting(true);
     try {
-      setJob(await api.reverify(job.id, code));
+      const updated = await api.reverify(job.id, code);
+      setJob(updated);
+      if (updated.translation?.leanCode) setCode(updated.translation.leanCode);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "无法重新验证");
     } finally {
@@ -103,12 +114,12 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
     : config?.provider === "nebius"
       ? "Nebius · NVIDIA Nemotron"
       : config?.provider === "openai"
-        ? "OpenAI 已连接"
+        ? "OpenAI 已配置"
         : "连接中";
   const leanLabel = config?.lean.mode === "demo"
     ? "Lean 模拟验证"
     : config?.lean.mode === "cloud"
-      ? "云端 Lean 已就绪"
+      ? "云端 Lean 环境已配置"
       : config?.lean.projectConfigured ? "Lean 工程已配置" : "使用输入路径";
 
   return (
@@ -134,7 +145,7 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
           </div>
           <div className="hero-copy">
             <p>
-              从手写推导或 LaTeX 出发，经 AI 形式化、Lean 内核验证与诊断修复，
+              从{config?.provider === "nebius" ? "文字证明或 LaTeX" : "手写推导或 LaTeX"}出发，经 AI 形式化、Lean 内核验证与诊断修复，
               得到一份可以编译、可以编辑、也可以追溯的证明。
             </p>
             {config?.provider === "nebius" ? (
@@ -153,6 +164,10 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
           </div>
         ) : null}
 
+        {pollFailures >= 3 ? <button className="secondary-button" type="button" onClick={() => {
+          setPollFailures(0); setSubmitting(true); setError("");
+        }}>重新连接任务</button> : null}
+
         <div className="workbench-grid">
           <SourcePanel
             mode={mode}
@@ -163,7 +178,9 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
             projectPath={projectPath}
             autoRepair={autoRepair}
             busy={submitting}
+            ready={Boolean(config)}
             cloudMode={config?.lean.mode === "cloud"}
+            imageSupported={Boolean(config && config.provider !== "nebius")}
             onModeChange={setMode}
             onLatexChange={setLatex}
             onImageChange={(dataUrl, name) => { setImageDataUrl(dataUrl); setImageName(name); setError(""); }}

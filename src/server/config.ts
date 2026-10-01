@@ -14,6 +14,7 @@ export interface RuntimeConfig {
   provider: ModelProvider;
   apiKey?: string;
   backendToken?: string;
+  accessPassword?: string;
   model: string;
   baseURL?: string;
   reasoningEffort: ReasoningEffort;
@@ -72,6 +73,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     ? env.NEBIUS_API_KEY?.trim()
     : env.OPENAI_API_KEY?.trim();
   const backendToken = env.LEANBRIDGE_BACKEND_TOKEN?.trim();
+  const accessPassword = env.LEANBRIDGE_ACCESS_PASSWORD?.trim();
+  if (accessPassword && (accessPassword.length < 16 || accessPassword.length > 256 ||
+    [env.OPENAI_API_KEY?.trim(), env.NEBIUS_API_KEY?.trim(), env.TAVILY_API_KEY?.trim(), backendToken].includes(accessPassword))) {
+    throw new Error("LEANBRIDGE_ACCESS_PASSWORD must be 16-256 characters and different from service credentials");
+  }
   const leanProjectPath = env.LEAN_PROJECT_PATH?.trim();
   const tavilyRequested = booleanValue(env.TAVILY_GROUNDING_ENABLED);
   const tavilyApiKey = env.TAVILY_API_KEY?.trim();
@@ -107,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     provider,
     ...(apiKey ? { apiKey } : {}),
     ...(backendToken ? { backendToken } : {}),
+    ...(accessPassword ? { accessPassword } : {}),
     model,
     ...(baseURL ? { baseURL } : {}),
     reasoningEffort: reasoningEffort(env.OPENAI_REASONING_EFFORT),
