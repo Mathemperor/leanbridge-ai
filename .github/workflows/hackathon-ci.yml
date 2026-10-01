@@ -3,6 +3,7 @@ name: Hackathon CI
 on:
   push:
     branches:
+      - main
       - hackathon/nebius-nvidia-2026
   pull_request:
 
