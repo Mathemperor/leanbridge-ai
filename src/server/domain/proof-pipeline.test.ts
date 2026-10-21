@@ -87,6 +87,17 @@ function harness(results: VerificationResult[], maxRepairAttempts = 3) {
 }
 
 describe("ProofPipeline", () => {
+  it("verifies supplied Lean without calling the model", async () => {
+    const {pipeline,model,verifier}=harness([verified]);
+    model.failure=new Error("AI must not run");
+    const result=await pipeline.verifyCode("example : True := by trivial");
+    expect(result.status).toBe("verified");
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.kind).toBe("manual");
+    expect(verifier.calls[0]?.code).toBe("example : True := by trivial");
+    expect(model.repairs).toHaveLength(0);
+    await expect(pipeline.verifyCode("example : False := by sorry")).rejects.toThrow(/placeholder/);
+  });
   it("finishes a valid initial translation", async () => {
     const { pipeline, verifier } = harness([verified]);
     const job = pipeline.start(source);

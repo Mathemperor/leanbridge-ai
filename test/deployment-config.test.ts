@@ -10,7 +10,7 @@ async function read(relativePath: string): Promise<string> {
 
 describe("cloud deployment configuration", () => {
   it("pins the Lean and mathlib releases", async () => {
-    await expect(read("lean-project/lean-toolchain")).resolves.toBe("leanprover/lean4:v4.24.0\n");
+    expect((await read("lean-project/lean-toolchain")).trim()).toBe("leanprover/lean4:v4.24.0");
     await expect(read("lean-project/lakefile.toml")).resolves.toMatch(/rev\s*=\s*"v4\.24\.0"/);
     await expect(read("lean-project/LeanBridge/Basic.lean")).resolves.toContain("import Mathlib");
     const manifest = JSON.parse(await read("lean-project/lake-manifest.json")) as {
@@ -26,7 +26,11 @@ describe("cloud deployment configuration", () => {
     expect(dockerfile).toContain("FROM node:22-bookworm-slim");
     expect(dockerfile).toContain("ENV CLOUD_MODE=true");
     expect(dockerfile).toContain("ENV LEAN_PROJECT_PATH=/app/lean-project");
-    expect(dockerfile).toMatch(/USER\s+leanbridge/);
+    const startup = await read("docker-cloud-start.sh");
+    expect(startup).toContain('exec gosu leanbridge /usr/local/bin/docker-entrypoint.sh "$@"');
+    expect(startup).toContain('chmod 700 /data/codex');
+    expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/docker-cloud-start.sh"]');
+    expect(dockerfile).toContain('@openai/codex@0.163.0');
     expect(dockerfile).toContain("docker-entrypoint.sh");
     expect(dockerfile).not.toMatch(/RUN\s+chmod\s+-R\s+a-w\s+\/app\s+\/opt\/elan/);
     expect(dockerfile).toMatch(/COPY\s+--chmod=0444\s+package\.json\s+package-lock\.json\s+\.\//);

@@ -55,10 +55,12 @@ RUN set -eu; \
 FROM node:22-bookworm-slim AS runtime
 
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates libgmp10 \
+  && apt-get install --yes --no-install-recommends ca-certificates libgmp10 gosu \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --gid 10001 leanbridge \
   && useradd --create-home --uid 10001 --gid leanbridge --shell /usr/sbin/nologin leanbridge
+
+RUN npm install --global @openai/codex@0.163.0 && npm cache clean --force
 
 ENV NODE_ENV=production
 ENV CLOUD_MODE=true
@@ -67,6 +69,7 @@ ENV LEAN_PROJECT_PATH=/app/lean-project
 ENV ELAN_HOME=/opt/elan
 ENV PATH="${ELAN_HOME}/bin:${PATH}"
 ENV LAKE_COMMAND=/usr/local/bin/leanbridge-lake-env
+ENV CODEX_HOME=/data/codex
 
 WORKDIR /app
 
@@ -77,10 +80,9 @@ COPY --chmod=0555 --from=lean-environment /opt/elan /opt/elan
 COPY --chmod=0555 --from=lean-environment /app/lean-project ./lean-project
 COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=0555 docker-lean-wrapper.sh /usr/local/bin/leanbridge-lake-env
+COPY --chmod=0555 docker-cloud-start.sh /usr/local/bin/docker-cloud-start.sh
 
 EXPOSE 4310
 
-USER leanbridge
-
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-cloud-start.sh"]
 CMD ["node", "dist/server/index.js"]

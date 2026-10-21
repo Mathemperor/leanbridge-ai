@@ -69,6 +69,12 @@ function makeApp(options: {
 }
 
 describe("LeanBridge HTTP API", () => {
+  it("protects manual compilation and creates a source record without translation", async () => {
+    const cloud = makeApp({backendToken:"test-private-token",cloudMode:true});
+    expect((await request(cloud).post("/api/proofs/manual").send({code:"example : True := by trivial"})).status).toBe(401);
+    const result=await request(cloud).post("/api/proofs/manual").set("Authorization","Bearer test-private-token").send({code:"example : True := by trivial"});
+    expect(result.status).toBe(200);expect(result.body.status).toBe("verified");expect(result.body.attempts).toHaveLength(1);expect(result.body.translation.notes).toContain("本任务未调用 AI 模型。");
+  });
   let app: ReturnType<typeof makeApp>;
 
   beforeEach(() => {

@@ -8,6 +8,7 @@ import type { LeanVerifier, VerifyOptions } from "./domain/ports";
 import { JobStoreCapacityError } from "./domain/job-store";
 import type { PublicRuntimeConfig } from "./config";
 import { browserAccess } from "./browser-access";
+import type { CodexSession } from "./adapters/model/codex-proof-model";
 
 const manualVerificationSchema = z.object({
   code: z.string().trim().min(1, "Lean 代码不能为空").max(200_000),
@@ -22,6 +23,7 @@ export interface CreateAppOptions {
   cloudMode?: boolean;
   readinessVerifier?: LeanVerifier;
   readinessOptions?: VerifyOptions;
+  codexSession?: Pick<CodexSession, "status" | "startLogin">;
 }
 
 export function createApp(options: CreateAppOptions): Express {
@@ -63,6 +65,17 @@ export function createApp(options: CreateAppOptions): Express {
 
   app.get("/api/config", (_request, response) => {
     response.json(options.publicConfig);
+  });
+
+  if (options.codexSession) {
+    app.get("/api/codex/status", async (_request,response) => {response.set("Cache-Control","no-store").json(await options.codexSession!.status());});
+    app.post("/api/codex/login", async (_request,response) => {response.set("Cache-Control","no-store").json(await options.codexSession!.startLogin());});
+  }
+  app.post("/api/proofs/manual", async (request,response) => {
+    const parsed=manualVerificationSchema.safeParse(request.body);
+    if(!parsed.success){response.status(400).json({error:"Lean 代码无效"});return;}
+    try {response.json(await options.pipeline.verifyCode(parsed.data.code));}
+    catch(error){response.status(error instanceof JobStoreCapacityError?429:400).json({error:error instanceof JobStoreCapacityError?"当前证明任务过多，请稍后重试":"代码包含不允许的命令或证明占位符"});}
   });
 
   app.post("/api/proofs", (request, response) => {

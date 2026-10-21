@@ -7,6 +7,7 @@ import { SerialLeanVerifier } from "./adapters/lean/serial-verifier";
 import { DemoProofModel } from "./adapters/model/demo-proof-model";
 import { NebiusProofModel } from "./adapters/model/nebius-proof-model";
 import { OpenAIProofModel } from "./adapters/model/openai-proof-model";
+import { CodexProofModel, CodexSession } from "./adapters/model/codex-proof-model";
 import { loadConfig, toPublicConfig } from "./config";
 import { ProofPipeline } from "./domain/proof-pipeline";
 import { loadRuntimeEnvironment } from "./secret-env";
@@ -17,6 +18,8 @@ const tavilyGrounder = config.tavilyGroundingEnabled
   : undefined;
 const model = config.demoMode
   ? new DemoProofModel()
+  : config.provider === "codex"
+    ? new CodexProofModel({model:config.model,reasoningEffort:config.reasoningEffort})
   : config.provider === "nebius"
     ? new NebiusProofModel({
         apiKey: config.apiKey as string,
@@ -50,6 +53,7 @@ const app = createApp({
   ...(config.backendToken ? { backendToken: config.backendToken } : {}),
   ...(config.accessPassword ? { accessPassword: config.accessPassword } : {}),
   cloudMode: config.cloudMode,
+  ...(config.provider === "codex" ? {codexSession:new CodexSession()} : {}),
   ...(config.demoMode
     ? {}
     : {

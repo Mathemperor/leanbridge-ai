@@ -1,7 +1,7 @@
 import type { ReasoningEffort } from "./adapters/model/openai-proof-model";
 
 const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
-const MODEL_PROVIDERS = ["openai", "nebius"] as const;
+const MODEL_PROVIDERS = ["openai", "nebius", "codex"] as const;
 const DEFAULT_NEBIUS_BASE_URL = "https://api.tokenfactory.us-central1.nebius.com/v1/";
 const DEFAULT_NEBIUS_MODEL = "nvidia/nemotron-3-super-120b-a12b";
 
@@ -69,7 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
   const cloudMode = booleanValue(env.CLOUD_MODE);
   const demoMode = cloudMode ? false : booleanValue(env.DEMO_MODE);
   const provider = modelProvider(env.MODEL_PROVIDER);
-  const apiKey = provider === "nebius"
+  const apiKey = provider === "codex" ? undefined : provider === "nebius"
     ? env.NEBIUS_API_KEY?.trim()
     : env.OPENAI_API_KEY?.trim();
   const backendToken = env.LEANBRIDGE_BACKEND_TOKEN?.trim();
@@ -83,7 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
   const tavilyApiKey = env.TAVILY_API_KEY?.trim();
   const tavilyGroundingEnabled = !demoMode && tavilyRequested;
 
-  if (!demoMode && !apiKey) {
+  if (!demoMode && provider !== "codex" && !apiKey) {
     throw new Error(`${provider === "nebius" ? "NEBIUS_API_KEY" : "OPENAI_API_KEY"} is required unless DEMO_MODE=true`);
   }
   if (tavilyGroundingEnabled && provider !== "nebius") {
@@ -99,7 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     throw new Error("LEAN_PROJECT_PATH is required in cloud mode");
   }
 
-  const model = provider === "nebius"
+  const model = provider === "codex" ? env.CODEX_MODEL?.trim() || "gpt-6-astra" : provider === "nebius"
     ? env.NEBIUS_MODEL?.trim() || DEFAULT_NEBIUS_MODEL
     : env.OPENAI_MODEL?.trim() || "gpt-5.6";
   const baseURL = provider === "nebius"
@@ -116,7 +116,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     ...(accessPassword ? { accessPassword } : {}),
     model,
     ...(baseURL ? { baseURL } : {}),
-    reasoningEffort: reasoningEffort(env.OPENAI_REASONING_EFFORT),
+    reasoningEffort: reasoningEffort(provider === "codex" ? env.CODEX_REASONING_EFFORT : env.OPENAI_REASONING_EFFORT),
     tavilyGroundingEnabled,
     ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),
