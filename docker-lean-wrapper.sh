@@ -18,4 +18,7 @@ case "$lean_bin" in
 esac
 
 export LEAN_PATH
-exec "$lean_bin" "$3"
+# Keep one compiler worker and reserve memory for the web server in the 512 MB
+# container. Lean's allocation limit does not include every mapped library page;
+# Railway's container limit remains the overall bound.
+exec "$lean_bin" -j1 -M256 "$3"
