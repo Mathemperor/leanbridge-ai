@@ -58,7 +58,7 @@ describe("cloud deployment configuration", () => {
     expect(wrapper).toContain('[ "$1" = "env" ]');
     expect(wrapper).toContain('[ "$2" = "lean" ]');
     expect(wrapper).toContain("export LEAN_PATH");
-    expect(wrapper).toContain('exec "$lean_bin" "$3"');
+    expect(wrapper).toContain('exec "$lean_bin" -j1 -M256 "$3"');
   });
 
   it("uses Railway's Dockerfile builder and public health endpoint", async () => {
