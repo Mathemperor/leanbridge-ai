@@ -50,9 +50,12 @@ RUN set -eu; \
   done; \
   lake env lean -j2 LeanBridge/Basic.lean; \
   lake env printenv LEAN_PATH > .lean-path; \
-  elan which lean > .lean-bin
+  elan which lean > .lean-bin; \
+  find /root/.cache/mathlib -maxdepth 1 -type f -name '*.ltar' -delete
 
-FROM node:22-bookworm-slim AS runtime
+# Reuse the large toolchain and Mathlib layers directly. Copying and changing
+# permissions on them again can exhaust the hosted builder's deadline.
+FROM lean-environment AS runtime
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates libgmp10 gosu \
@@ -76,11 +79,20 @@ WORKDIR /app
 COPY --chmod=0444 package.json package-lock.json ./
 COPY --chmod=0555 --from=application-build /app/node_modules ./node_modules
 COPY --chmod=0555 --from=application-build /app/dist ./dist
-COPY --chmod=0555 --from=lean-environment /opt/elan /opt/elan
-COPY --chmod=0555 --from=lean-environment /app/lean-project ./lean-project
 COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=0555 docker-lean-wrapper.sh /usr/local/bin/leanbridge-lake-env
 COPY --chmod=0555 docker-cloud-start.sh /usr/local/bin/docker-cloud-start.sh
+
+# Inherited files are owned by root. Verify that the service account cannot
+# modify them, then compile through the same bounded wrapper used in production.
+RUN set -eu; \
+  writable="$(gosu leanbridge find /opt/elan /app/lean-project -writable -print -quit)"; \
+  if [ -n "$writable" ]; then \
+    echo "Lean runtime files must be read-only for the service account." >&2; \
+    exit 1; \
+  fi; \
+  cd /app/lean-project; \
+  gosu leanbridge /usr/local/bin/leanbridge-lake-env env lean LeanBridge/Basic.lean
 
 EXPOSE 4310
 
