@@ -34,8 +34,10 @@ describe("cloud deployment configuration", () => {
     expect(dockerfile).toContain("docker-entrypoint.sh");
     expect(dockerfile).not.toMatch(/RUN\s+chmod\s+-R\s+a-w\s+\/app\s+\/opt\/elan/);
     expect(dockerfile).toMatch(/COPY\s+--chmod=0444\s+package\.json\s+package-lock\.json\s+\.\//);
-    expect(dockerfile).toMatch(/COPY\s+--chmod=0555\s+--from=lean-environment\s+\/opt\/elan\s+\/opt\/elan/);
-    expect(dockerfile).toMatch(/COPY\s+--chmod=0555\s+--from=lean-environment\s+\/app\/lean-project\s+\.\/lean-project/);
+    expect(dockerfile).toContain("FROM lean-environment AS runtime");
+    expect(dockerfile).not.toMatch(/COPY[^\n]*--from=lean-environment/);
+    expect(dockerfile).toContain("gosu leanbridge find /opt/elan /app/lean-project -writable -print -quit");
+    expect(dockerfile).toContain("gosu leanbridge /usr/local/bin/leanbridge-lake-env env lean LeanBridge/Basic.lean");
     expect(dockerfile).not.toContain("lake update");
     expect(dockerfile).not.toMatch(/OPENAI_API_KEY\s*=/);
     expect(dockerfile).not.toMatch(/NEBIUS_API_KEY\s*=/);
