@@ -65,6 +65,7 @@ export class InMemoryJobStore {
       id: randomUUID(),
       mode: request.mode,
       request: structuredClone(request),
+      ...(request.model && request.reasoningEffort ? { modelConfig: { model: request.model, reasoningEffort: request.reasoningEffort } } : {}),
       status: "queued",
       createdAt,
       updatedAt: createdAt,
