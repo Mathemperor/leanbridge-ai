@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { z } from "zod";
 import { proofRequestSchema } from "@shared/proof";
+import { resolveCodexSettings } from "@shared/codex-options";
 import type { ProofPipeline } from "./domain/proof-pipeline";
 import type { LeanVerifier, VerifyOptions } from "./domain/ports";
 import { JobStoreCapacityError } from "./domain/job-store";
@@ -93,6 +94,12 @@ export function createApp(options: CreateAppOptions): Express {
     }
 
     let job;
+    if (options.publicConfig.provider === "codex") {
+      try { Object.assign(parsed.data, resolveCodexSettings(parsed.data, options.publicConfig)); }
+      catch (error) { response.status(400).json({ error: (error as Error).message }); return; }
+    } else if (parsed.data.model || parsed.data.reasoningEffort) {
+      response.status(400).json({ error: "模型选择仅适用于 Codex 订阅模式。" }); return;
+    }
     try {
       job = options.pipeline.start(parsed.data);
     } catch (error) {
