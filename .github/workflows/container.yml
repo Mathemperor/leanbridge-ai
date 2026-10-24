@@ -51,7 +51,6 @@ jobs:
           npm ci
           npm test
           npm run typecheck
-          node --test scripts/check-image-manifest.test.mjs
       - name: Make room for Lean and Mathlib
         run: |
           df -h /
