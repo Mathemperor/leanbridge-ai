@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CODEX_REASONING_EFFORTS, type CodexSettings } from "./codex-options";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
@@ -19,6 +20,8 @@ export const imageDataUrlSchema = z
   .refine((value) => decodedBase64Bytes(value) <= MAX_IMAGE_BYTES, "图片不能超过 10 MiB");
 
 const commonRequestFields = {
+  model: z.string().trim().min(1).max(100).optional(),
+  reasoningEffort: z.enum(CODEX_REASONING_EFFORTS).optional(),
   projectPath: z.string().trim().max(4_096).optional(),
   autoRepair: z.boolean().default(true),
 };
@@ -96,6 +99,7 @@ export interface ProofAttempt {
 }
 
 export interface ProofJob {
+  modelConfig?: CodexSettings;
   id: string;
   mode: ProofMode;
   status: ProofJobStatus;
