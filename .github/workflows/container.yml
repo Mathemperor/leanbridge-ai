@@ -1,0 +1,121 @@
+name: Build verified LeanBridge container
+
+on:
+  push:
+    branches: [codex/subscription-cloud-20261021]
+    paths:
+      - .github/workflows/container.yml
+      - scripts/**
+      - Dockerfile
+      - .dockerignore
+      - docker-*.sh
+      - src/**
+      - test/**
+      - lean-project/**
+      - package*.json
+      - tsconfig*.json
+      - vite.config.ts
+      - index.html
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leanbridge-container-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  container:
+    if: github.repository == 'Mathemperor/leanbridge-ai'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_REPOSITORY: ghcr.io/mathemperor/leanbridge-ai
+      TEST_IMAGE: leanbridge-ci:verified
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check application
+        run: |
+          npm ci
+          npm test
+          npm run typecheck
+          node --test scripts/check-image-manifest.test.mjs
+      - name: Make room for Lean and Mathlib
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build test image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.TEST_IMAGE }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Mathemperor/leanbridge-ai
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false
+          cache-from: type=gha,scope=leanbridge-amd64
+      - name: Verify real Lean with 512 MiB and one CPU
+        run: node scripts/container-smoke.mjs "$TEST_IMAGE"
+      - name: Save container verification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: container-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/leanbridge-container-smoke.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified image
+        id: publish
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPOSITORY }}:sha-${{ github.sha }}
+            ${{ env.IMAGE_REPOSITORY }}:run-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Mathemperor/leanbridge-ai
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false
+          cache-from: type=gha,scope=leanbridge-amd64
+          cache-to: type=gha,mode=max,scope=leanbridge-amd64,ignore-error=true,timeout=20m
+      - name: Record immutable Railway image source
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          test -n "$IMAGE_DIGEST"
+          docker buildx imagetools inspect "$IMAGE_REPOSITORY@$IMAGE_DIGEST" --raw | node scripts/check-image-manifest.mjs
+          {
+            echo '## Verified container'
+            echo "Source revision: $SOURCE_REVISION"
+            echo "Railway image: $IMAGE_REPOSITORY@$IMAGE_DIGEST"
+            echo 'GHCR package must allow anonymous pulls before Railway Free can deploy it.'
+            echo 'Production Codex subscription and Railway Lean acceptance remain separate checks.'
+          } >> "$GITHUB_STEP_SUMMARY"
