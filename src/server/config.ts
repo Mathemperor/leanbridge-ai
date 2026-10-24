@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from "./adapters/model/openai-proof-model";
+import { codexCatalog, type CodexCatalog } from "@shared/codex-options";
 
 const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
 const MODEL_PROVIDERS = ["openai", "nebius", "codex"] as const;
@@ -28,6 +29,7 @@ export interface RuntimeConfig {
 }
 
 export interface PublicRuntimeConfig {
+  codexCatalog?: CodexCatalog;
   provider: "demo" | ModelProvider;
   model: string;
   reasoningEffort: ReasoningEffort;
@@ -129,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
 
 export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
   return {
+    ...(config.provider === "codex" && !config.demoMode ? { codexCatalog: codexCatalog(config) } : {}),
     provider: config.demoMode ? "demo" : config.provider,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
