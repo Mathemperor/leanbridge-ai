@@ -18,6 +18,6 @@ case "$lean_bin" in
 esac
 
 export LEAN_PATH
-# Keep one compiler worker and cap Lean's internal heap at 192 MB so the web
-# server, kernel slab, and mapped .olean file cache fit safely inside 512 MB.
-exec "$lean_bin" -j1 -M192 "$3"
+# Keep one compiler worker and cap Lean's internal heap at 112 MB so total memory
+# (Node 45 MB + Lean 100 MB + .olean cache 240 MB) peaks safely below 400 MB.
+exec "$lean_bin" -j1 -M112 "$3"

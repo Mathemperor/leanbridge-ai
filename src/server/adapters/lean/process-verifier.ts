@@ -5,6 +5,7 @@ import { basename, delimiter, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { VerificationResult } from "@shared/proof";
 import type { LeanVerifier, VerifyOptions } from "@server/domain/ports";
+import { triggerGarbageCollection } from "@server/domain/runtime-memory";
 import { parseLeanOutput } from "./diagnostics";
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -137,6 +138,7 @@ export class PinnedLeanReadinessVerifier implements LeanVerifier {
 
 export class ProcessLeanVerifier implements LeanVerifier {
   async verify(code: string, options: VerifyOptions = {}): Promise<VerificationResult> {
+    triggerGarbageCollection();
     const started = Date.now();
     const projectPath = resolve(options.projectPath ?? process.cwd());
     const timeoutMs = options.timeoutMs ?? 30_000;

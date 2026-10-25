@@ -12,7 +12,11 @@ interface CommandResult { code: number | null; stdout: string; stderr: string; t
 interface CommandOptions { input?: string; timeoutMs: number; cwd?: string }
 export type CommandRunner = (command: string, args: string[], options: CommandOptions) => Promise<CommandResult>;
 export function codexEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { NO_COLOR:"1", TERM:"dumb" };
+  const env: NodeJS.ProcessEnv = {
+    NO_COLOR: "1",
+    TERM: "dumb",
+    NODE_OPTIONS: "--max-old-space-size=64",
+  };
   for (const key of ["PATH","HOME","CODEX_HOME","SystemRoot","TEMP","TMP","USERPROFILE","LANG"]) {
     if (source[key]) env[key]=source[key];
   }
