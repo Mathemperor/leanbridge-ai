@@ -14,7 +14,6 @@ COPY src ./src
 RUN npm run build \
   && npm prune --omit=dev \
   && mkdir -p /app/dist/native \
-  && gcc -O2 -Wall -Wextra -fPIC -shared -pthread src/native/leanbridge-memguard.c -o /app/dist/native/liblean_memguard.so -ldl \
   && gcc -O2 -Wall -Wextra src/native/leanbridge-evict-cache.c -o /app/dist/native/leanbridge-evict-cache
 
 FROM node:22-bookworm-slim AS lean-environment
@@ -88,7 +87,6 @@ WORKDIR /app
 COPY --chmod=0444 package.json package-lock.json ./
 COPY --chmod=0555 --from=application-build /app/node_modules ./node_modules
 COPY --chmod=0555 --from=application-build /app/dist ./dist
-COPY --chmod=0555 --from=application-build /app/dist/native/liblean_memguard.so /usr/local/lib/liblean_memguard.so
 COPY --chmod=0555 --from=application-build /app/dist/native/leanbridge-evict-cache /usr/local/bin/leanbridge-evict-cache
 COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=0555 docker-lean-wrapper.sh /usr/local/bin/leanbridge-lake-env

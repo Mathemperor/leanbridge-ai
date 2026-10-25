@@ -11,33 +11,14 @@
 #define POSIX_FADV_DONTNEED 4
 #endif
 
-#define TOUCHED_LOG_PATH "/tmp/leanbridge-touched-files.txt"
-
-static void evict_single_file(const char *path) {
-  if (!path || path[0] != '/') return;
-  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  if (fd >= 0) {
-    posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
-    close(fd);
-  }
-}
-
-static void evict_from_touched_log(void) {
-  FILE *fp = fopen(TOUCHED_LOG_PATH, "re");
-  if (!fp) return;
-
-  char line[1024];
-  while (fgets(line, sizeof(line), fp) != NULL) {
-    size_t len = strlen(line);
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-      line[--len] = '\0';
-    }
-    if (len > 0) {
-      evict_single_file(line);
-    }
-  }
-  fclose(fp);
-  unlink(TOUCHED_LOG_PATH);
+static int is_target_file(const char *name) {
+  size_t len = strlen(name);
+  if (len >= 6 && strcmp(name + len - 6, ".olean") == 0) return 1;
+  if (len >= 14 && strcmp(name + len - 14, ".olean.private") == 0) return 1;
+  if (len >= 13 && strcmp(name + len - 13, ".olean.server") == 0) return 1;
+  if (len >= 3 && strcmp(name + len - 3, ".ir") == 0) return 1;
+  if (len >= 6 && strcmp(name + len - 6, ".ilean") == 0) return 1;
+  return 0;
 }
 
 static void walk_and_evict(int dir_fd, int depth) {
@@ -62,10 +43,12 @@ static void walk_and_evict(int dir_fd, int depth) {
         walk_and_evict(sub_fd, depth + 1);
       }
     } else if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-      int fd = openat(dir_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-      if (fd >= 0) {
-        posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
-        close(fd);
+      if (is_target_file(name)) {
+        int fd = openat(dir_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        if (fd >= 0) {
+          posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+          close(fd);
+        }
       }
     }
   }
@@ -80,11 +63,13 @@ static void evict_root(const char *path) {
 }
 
 int main(int argc, char **argv) {
-  evict_from_touched_log();
-  if (argc > 2 && strcmp(argv[1], "--walk") == 0) {
-    for (int i = 2; i < argc; i++) {
-      evict_root(argv[i]);
-    }
+  if (argc <= 1) {
+    evict_root("/app/lean-project/.lake");
+    evict_root("/opt/elan/toolchains/leanprover--lean4---v4.24.0/lib/lean");
+    return 0;
+  }
+  for (int i = 1; i < argc; i++) {
+    evict_root(argv[i]);
   }
   return 0;
 }

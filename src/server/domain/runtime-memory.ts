@@ -7,9 +7,7 @@ const NATIVE_EVICT_BINARY = "/usr/local/bin/leanbridge-evict-cache";
 
 export const DEFAULT_CACHE_DIRECTORIES = [
   "/app/lean-project/.lake",
-  "/opt/elan",
-  "/app/node_modules",
-  "/usr/local/lib/node_modules/@openai/codex",
+  "/opt/elan/toolchains/leanprover--lean4---v4.24.0/lib/lean",
 ] as const;
 
 // Perl core fallback script (works with Debian's Essential perl-base package)

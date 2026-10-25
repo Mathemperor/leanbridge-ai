@@ -18,9 +18,6 @@ case "$lean_bin" in
 esac
 
 export LEAN_PATH
-if [ -f /usr/local/lib/liblean_memguard.so ]; then
-  export LD_PRELOAD="/usr/local/lib/liblean_memguard.so${LD_PRELOAD:+:$LD_PRELOAD}"
-fi
 # Keep one compiler worker and cap Lean's internal heap at 192 MB so the web
 # server, kernel slab, and mapped .olean file cache fit safely inside 512 MB.
 exec "$lean_bin" -j1 -M192 "$3"
