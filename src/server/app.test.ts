@@ -300,12 +300,24 @@ describe("LeanBridge HTTP API", () => {
       .toEqual({ required: false, available: false, authenticated: true });
   });
 
-  it("reports real Lean readiness through the configured verifier", async () => {
-    const readyApp = makeApp({ readinessVerifier: new Verifier() });
-    const response = await request(readyApp).get("/api/ready");
+  it("reports real Lean readiness through the configured verifier and caches success", async () => {
+    let calls = 0;
+    const readyApp = makeApp({
+      readinessVerifier: {
+        async verify() {
+          calls += 1;
+          return verified;
+        },
+      },
+    });
+    const first = await request(readyApp).get("/api/ready");
+    const second = await request(readyApp).get("/api/ready");
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ ok: true, lean: "ready" });
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({ ok: true, lean: "ready" });
+    expect(second.status).toBe(200);
+    expect(second.body).toEqual({ ok: true, lean: "ready" });
+    expect(calls).toBe(1);
   });
 
   it("returns 503 when the Lean readiness probe fails", async () => {

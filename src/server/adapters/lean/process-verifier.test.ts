@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { SpawnOptions } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { leanSubprocessEnvironment, ProcessLeanVerifier } from "./process-verifier";
+import { leanSubprocessEnvironment, PinnedLeanReadinessVerifier, ProcessLeanVerifier } from "./process-verifier";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeLean = resolve(here, "../../../../test/fixtures/fake-lean.mjs");
@@ -103,5 +103,33 @@ describe("ProcessLeanVerifier", () => {
 
     expect(result).toMatchObject({ ok: false, status: "timeout" });
     expect(result.durationMs).toBeLessThan(1_000);
+  });
+
+  it("checks pinned container readiness metadata without spawning Lean", async () => {
+    const pinnedDir = await mkdtemp(resolve(tmpdir(), "leanbridge-pinned-"));
+    try {
+      await writeFile(join(pinnedDir, ".lean-bin"), `${process.execPath}\n`, "utf8");
+      await writeFile(join(pinnedDir, ".lean-path"), `${pinnedDir}\n`, "utf8");
+      let fallbackCalled = false;
+      const readiness = new PinnedLeanReadinessVerifier({
+        async verify() {
+          fallbackCalled = true;
+          throw new Error("should not spawn compiler");
+        },
+      });
+
+      const result = await readiness.verify("theorem ready : True := by trivial", {
+        projectPath: pinnedDir,
+      });
+
+      expect(fallbackCalled).toBe(false);
+      expect(result).toMatchObject({
+        ok: true,
+        status: "verified",
+        command: "pinned-lean-readiness",
+      });
+    } finally {
+      await rm(pinnedDir, { recursive: true, force: true });
+    }
   });
 });

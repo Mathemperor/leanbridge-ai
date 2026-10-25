@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { sanitizeLeanCode, translationSchema, type ProofRequest, type Translation } from "@shared/proof";
 import { resolveCodexSettings, type CodexSettings } from "@shared/codex-options";
 import type { ProofModel, RepairContext } from "../../domain/ports";
+import type { RuntimeMemoryCoordinator } from "../../domain/runtime-memory";
 import { LEAN_SYSTEM_PROMPT, sourceInstruction, repairInstruction } from "./prompt";
 
 interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
@@ -33,12 +34,19 @@ const OUTPUT_SCHEMA={type:"object",additionalProperties:false,required:["normali
 
 export class CodexProofModel implements ProofModel {
   #tail:Promise<unknown>=Promise.resolve();
-  constructor(private readonly config:{model:string;reasoningEffort:string},private readonly runner:CommandRunner=runCodexCommand){}
+  constructor(
+    private readonly config:{model:string;reasoningEffort:string},
+    private readonly runner:CommandRunner=runCodexCommand,
+    private readonly coordinator?:Pick<RuntimeMemoryCoordinator,"runExclusive">,
+  ){}
   translate(source:ProofRequest):Promise<Translation>{return this.#enqueue(source,sourceInstruction(source));}
   repair(context:RepairContext):Promise<Translation>{return this.#enqueue(context.source,repairInstruction(context.translation,context.diagnostics),false);}
   #enqueue(source:ProofRequest,instruction:string,attachImage=true):Promise<Translation>{
     const settings=resolveCodexSettings(source,this.config);
-    const job=this.#tail.then(()=>this.#execute(source,instruction,settings,attachImage));this.#tail=job.catch(()=>{});return job;
+    const runTask=()=>this.#execute(source,instruction,settings,attachImage);
+    const job=this.#tail.then(()=>this.coordinator?this.coordinator.runExclusive("codex",runTask):runTask());
+    this.#tail=job.catch(()=>{});
+    return job;
   }
   async #execute(source:ProofRequest,instruction:string,settings:CodexSettings,attachImage:boolean):Promise<Translation>{
     const directory=await mkdtemp(join(tmpdir(),"leanbridge-codex-"));
@@ -73,6 +81,8 @@ export function parseDeviceLogin(output:string):{verificationUrl:string;userCode
   return url&&code?{verificationUrl:url,userCode:code}:null;
 }
 export interface CodexAuthState {connected:boolean;state:"connected"|"idle"|"pending"|"failed";verificationUrl?:string;userCode?:string;expiresAt?:string;message?:string}
+const CONNECTED_STATUS_TTL_MS = 60_000;
+const DISCONNECTED_STATUS_TTL_MS = 5_000;
 export class CodexSession {
   #child:ChildProcess|undefined;
   #pending:{verificationUrl:string;userCode:string;expiresAt:string}|undefined;
@@ -80,7 +90,8 @@ export class CodexSession {
   #cached:{at:number;connected:boolean}|undefined;
   #starting:Promise<CodexAuthState>|undefined;
   async status():Promise<CodexAuthState>{
-    if(!this.#cached||Date.now()-this.#cached.at>5000){
+    const ttlMs = this.#cached?.connected ? CONNECTED_STATUS_TTL_MS : DISCONNECTED_STATUS_TTL_MS;
+    if(!this.#cached||Date.now()-this.#cached.at>ttlMs){
       const result=await runCodexCommand("codex",[...AUTH_ARGS,"login","status"],{timeoutMs:8000}).catch(()=>null);
       this.#cached={at:Date.now(),connected:Boolean(result?.code===0&&/ChatGPT/i.test(result.stdout+result.stderr))};
     }

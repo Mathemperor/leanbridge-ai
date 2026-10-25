@@ -25,6 +25,7 @@ export interface CreateAppOptions {
   cloudMode?: boolean;
   readinessVerifier?: LeanVerifier;
   readinessOptions?: VerifyOptions;
+  readinessCacheTtlMs?: number;
   codexSession?: Pick<CodexSession, "status" | "startLogin">;
 }
 
@@ -40,7 +41,13 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api", browserAccess(options));
 
   if (options.readinessVerifier) {
+    let cachedReadyAt = 0;
+    const readinessCacheTtlMs = options.readinessCacheTtlMs ?? 5 * 60 * 1_000;
     app.get("/api/ready", async (_request, response) => {
+      if (cachedReadyAt > 0 && Date.now() - cachedReadyAt < readinessCacheTtlMs) {
+        response.json({ ok: true, lean: "ready" });
+        return;
+      }
       try {
         const result = await options.readinessVerifier!.verify(
           "theorem leanBridgeReady : True := by\n  trivial",
@@ -58,6 +65,7 @@ export function createApp(options: CreateAppOptions): Express {
           });
           return;
         }
+        cachedReadyAt = Date.now();
         response.json({ ok: true, lean: "ready" });
       } catch {
         response.status(503).json({ ok: false, lean: "unavailable" });

@@ -8,6 +8,7 @@ import type {
   Translation,
   VerificationResult,
 } from "@shared/proof";
+import { triggerGarbageCollection } from "./runtime-memory";
 
 const MAX_RETAINED_ATTEMPTS = 4;
 const MAX_RETAINED_EVENTS = 64;
@@ -18,6 +19,13 @@ export interface StoredProofJob extends ProofJob {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function cloneRequest(request: ProofRequest): ProofRequest {
+  if (request.mode === "image") {
+    return { ...request };
+  }
+  return structuredClone(request);
 }
 
 function publicSnapshot(job: StoredProofJob): ProofJob {
@@ -43,8 +51,8 @@ export class InMemoryJobStore {
   readonly #terminalTtlMs: number;
 
   constructor(options: InMemoryJobStoreOptions = {}) {
-    this.#maxJobs = options.maxJobs ?? 8;
-    this.#terminalTtlMs = options.terminalTtlMs ?? 60 * 60 * 1_000;
+    this.#maxJobs = options.maxJobs ?? 6;
+    this.#terminalTtlMs = options.terminalTtlMs ?? 15 * 60 * 1_000;
   }
 
   create(request: ProofRequest): ProofJob {
@@ -64,7 +72,7 @@ export class InMemoryJobStore {
     const job: StoredProofJob = {
       id: randomUUID(),
       mode: request.mode,
-      request: structuredClone(request),
+      request: cloneRequest(request),
       ...(request.model && request.reasoningEffort ? { modelConfig: { model: request.model, reasoningEffort: request.reasoningEffort } } : {}),
       status: "queued",
       createdAt,
@@ -92,6 +100,7 @@ export class InMemoryJobStore {
     if (job.request.mode === "image") {
       job.request.imageDataUrl = "data:image/png;base64,";
       job.updatedAt = now();
+      triggerGarbageCollection();
     }
   }
 

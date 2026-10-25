@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { VerificationResult } from "@shared/proof";
 import type { LeanVerifier, VerifyOptions } from "@server/domain/ports";
@@ -58,6 +58,67 @@ function stopProcess(pid: number | undefined): void {
       process.kill(pid, "SIGKILL");
     } catch {
       // The process already exited.
+    }
+  }
+}
+
+export class PinnedLeanReadinessVerifier implements LeanVerifier {
+  readonly #fallback: LeanVerifier;
+
+  constructor(fallback: LeanVerifier) {
+    this.#fallback = fallback;
+  }
+
+  async verify(code: string, options: VerifyOptions = {}): Promise<VerificationResult> {
+    const started = Date.now();
+    const projectPath = resolve(options.projectPath ?? process.cwd());
+    const leanBinFile = join(projectPath, ".lean-bin");
+    const leanPathFile = join(projectPath, ".lean-path");
+
+    if (!(await exists(leanBinFile)) || !(await exists(leanPathFile))) {
+      return this.#fallback.verify(code, options);
+    }
+
+    try {
+      const leanBin = (await readFile(leanBinFile, "utf8")).trim();
+      const leanPath = (await readFile(leanPathFile, "utf8")).trim();
+      if (!leanBin || !leanPath) {
+        throw new Error("Pinned Lean runtime metadata is empty.");
+      }
+      await access(leanBin, constants.X_OK);
+      const separator = leanPath.includes(delimiter) ? delimiter : ":";
+      const directories = (
+        process.platform === "win32" && /^[A-Za-z]:[\\/]/.test(leanPath) && !leanPath.includes(";")
+          ? [leanPath]
+          : leanPath.split(separator)
+      ).map((entry) => entry.trim()).filter(Boolean);
+      if (directories.length === 0) {
+        throw new Error("Pinned LEAN_PATH contains no directories.");
+      }
+      await Promise.all(directories.map((directory) => access(directory, constants.R_OK)));
+      if (options.lakeCommand?.startsWith("/")) {
+        await access(options.lakeCommand, constants.X_OK);
+      }
+      return {
+        ok: true,
+        status: "verified",
+        command: "pinned-lean-readiness",
+        durationMs: Date.now() - started,
+        output: "Lean verification succeeded.",
+        diagnostics: [],
+        exitCode: 0,
+      };
+    } catch (error) {
+      const output = error instanceof Error ? error.message : "Pinned Lean readiness check failed.";
+      return {
+        ok: false,
+        status: "failed",
+        command: "pinned-lean-readiness",
+        durationMs: Date.now() - started,
+        output,
+        diagnostics: parseLeanOutput(output),
+        exitCode: 1,
+      };
     }
   }
 }

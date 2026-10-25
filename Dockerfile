@@ -66,6 +66,7 @@ RUN apt-get update \
 RUN npm install --global @openai/codex@0.163.0 && npm cache clean --force
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=96 --expose-gc"
 ENV CLOUD_MODE=true
 ENV DEMO_MODE=false
 ENV LEAN_PROJECT_PATH=/app/lean-project

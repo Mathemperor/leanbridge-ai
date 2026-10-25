@@ -25,6 +25,7 @@ describe("cloud deployment configuration", () => {
     const entrypoint = await read("docker-entrypoint.sh");
     expect(dockerfile).toContain("FROM node:22-bookworm-slim");
     expect(dockerfile).toContain("ENV CLOUD_MODE=true");
+    expect(dockerfile).toContain('ENV NODE_OPTIONS="--max-old-space-size=96 --expose-gc"');
     expect(dockerfile).toContain("ENV LEAN_PROJECT_PATH=/app/lean-project");
     const startup = await read("docker-cloud-start.sh");
     expect(startup).toContain('exec gosu leanbridge /usr/local/bin/docker-entrypoint.sh "$@"');
@@ -60,7 +61,7 @@ describe("cloud deployment configuration", () => {
     expect(wrapper).toContain('[ "$1" = "env" ]');
     expect(wrapper).toContain('[ "$2" = "lean" ]');
     expect(wrapper).toContain("export LEAN_PATH");
-    expect(wrapper).toContain('exec "$lean_bin" -j1 -M256 "$3"');
+    expect(wrapper).toContain('exec "$lean_bin" -j1 -M192 "$3"');
   });
 
   it("uses Railway's Dockerfile builder and public health endpoint", async () => {
