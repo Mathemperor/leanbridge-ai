@@ -96,11 +96,11 @@ try {
   assert(config.body.codexCatalog?.models?.some(model => model.id === 'gpt-6.1-sol'), 'Model-selection catalog');
   record('codex-only-config-and-catalog', { provider: config.body.provider, lean: config.body.lean, modelCount: config.body.codexCatalog.models.length });
   const ready = await request('/api/ready');
-  assert.equal(ready.status, 200, 'Readiness check must succeed');
+  assert.equal(ready.status, 200, `Readiness check must succeed: ${JSON.stringify(ready.body)}`);
   assert.equal(ready.body.ok, true, 'Lean readiness must be ok');
   let memoryAfterReadyBytes = null;
   try { memoryAfterReadyBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.current'])); } catch { memoryAfterReadyBytes = null; }
-  record('readiness-without-page-cache-bloat', { httpStatus: ready.status, leanOk: ready.body.lean?.ok, memoryAfterReadyBytes });
+  record('readiness-without-page-cache-bloat', { httpStatus: ready.status, lean: ready.body.lean, memoryAfterReadyBytes });
   if (memoryAfterReadyBytes !== null) {
     assert(memoryAfterReadyBytes < 160_000_000, `Idle memory after /api/ready should stay below 160 MB, got ${memoryAfterReadyBytes}`);
   }

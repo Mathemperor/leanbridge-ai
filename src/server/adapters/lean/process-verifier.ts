@@ -95,7 +95,19 @@ export class PinnedLeanReadinessVerifier implements LeanVerifier {
       if (directories.length === 0) {
         throw new Error("Pinned LEAN_PATH contains no directories.");
       }
-      await Promise.all(directories.map((directory) => access(directory, constants.R_OK)));
+      const readableDirectories = await Promise.all(
+        directories.map(async (directory) => {
+          try {
+            await access(directory, constants.R_OK);
+            return true;
+          } catch {
+            return false;
+          }
+        }),
+      );
+      if (!readableDirectories.some(Boolean)) {
+        throw new Error("No readable Lean library directories found in pinned LEAN_PATH.");
+      }
       if (options.lakeCommand?.startsWith("/")) {
         await access(options.lakeCommand, constants.X_OK);
       }

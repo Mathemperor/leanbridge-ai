@@ -108,8 +108,13 @@ describe("ProcessLeanVerifier", () => {
   it("checks pinned container readiness metadata without spawning Lean", async () => {
     const pinnedDir = await mkdtemp(resolve(tmpdir(), "leanbridge-pinned-"));
     try {
+      const missingBuildDir = join(pinnedDir, "unbuilt-root-lib");
       await writeFile(join(pinnedDir, ".lean-bin"), `${process.execPath}\n`, "utf8");
-      await writeFile(join(pinnedDir, ".lean-path"), `${pinnedDir}\n`, "utf8");
+      await writeFile(
+        join(pinnedDir, ".lean-path"),
+        `${[missingBuildDir, pinnedDir].join(process.platform === "win32" ? ";" : ":")}\n`,
+        "utf8",
+      );
       let fallbackCalled = false;
       const readiness = new PinnedLeanReadinessVerifier({
         async verify() {
