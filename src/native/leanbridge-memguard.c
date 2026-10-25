@@ -1,12 +1,10 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -16,10 +14,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifndef MADV_PAGEOUT
-#define MADV_PAGEOUT 21
-#endif
-
 #ifndef POSIX_FADV_DONTNEED
 #define POSIX_FADV_DONTNEED 4
 #endif
@@ -28,50 +22,67 @@
 #define PM_PRESENT (1ULL << 63)
 #define PM_CLEAN_FILE_MASK (PM_PRESENT | PM_FILE)
 
-#define MEM_CURRENT_HIGH_BYTES (195LL * 1000 * 1000)
-#define MEM_CURRENT_LOW_BYTES (135LL * 1000 * 1000)
-#define MEM_FILE_HIGH_BYTES (80LL * 1000 * 1000)
-#define MEM_FILE_LOW_BYTES (25LL * 1000 * 1000)
-#define MEM_FILE_MIN_BYTES (8LL * 1000 * 1000)
+#define MEM_CURRENT_HIGH_BYTES (350LL * 1000 * 1000)
+#define MEM_CURRENT_EMERGENCY_BYTES (420LL * 1000 * 1000)
+#define MEM_CURRENT_LOW_BYTES (275LL * 1000 * 1000)
+#define MEM_FILE_HIGH_BYTES (220LL * 1000 * 1000)
+#define MEM_FILE_LOW_BYTES (130LL * 1000 * 1000)
+#define MEM_FILE_MIN_BYTES (95LL * 1000 * 1000)
 
+#define NORMAL_MAX_SWEEP_BYTES (85ULL * 1000 * 1000)
+#define EMERGENCY_MAX_SWEEP_BYTES (135ULL * 1000 * 1000)
+#define SWEEP_COOLDOWN_NS (200ULL * 1000 * 1000)
+#define EMERGENCY_COOLDOWN_NS (40ULL * 1000 * 1000)
+
+#define MAX_UNIQUE_FILES 4096
+#define PATH_HASH_SLOTS 8192
 #define MAX_VMAS 8192
 #define PATH_POOL_SIZE (512 * 1024)
 #define PAGEMAP_BATCH_PAGES 512
-#define RECENT_MMAP_SLOTS 8
+#define MAPS_READ_BUF_SIZE 32768
+
+#define TOUCHED_LOG_PATH "/tmp/leanbridge-touched-files.txt"
+
+typedef struct {
+  uint32_t path_offset;
+  int32_t first_vma_idx;
+} unique_file_t;
 
 typedef struct {
   uintptr_t start;
   uintptr_t end;
-  uint32_t path_offset;
-  uint8_t is_readonly;
+  int32_t next_vma_idx;
 } vma_entry_t;
 
 static int cgroup_current_fd = -1;
 static int cgroup_stat_fd = -1;
 static int pagemap_fd = -1;
+static int touched_log_fd = -1;
 static atomic_int guard_active = 0;
 static __thread int in_memguard = 0;
 
 static pthread_mutex_t evict_mutex = PTHREAD_MUTEX_INITIALIZER;
 static atomic_size_t mapped_bytes_since_check = 0;
-static atomic_size_t closed_files_since_check = 0;
-static atomic_uint_fast64_t last_mmap_ns = 0;
-static atomic_uintptr_t recent_mmap_addrs[RECENT_MMAP_SLOTS];
-static atomic_size_t recent_mmap_cursor = 0;
+static atomic_uint_fast64_t last_evict_ns = 0;
+
+static unique_file_t unique_files[MAX_UNIQUE_FILES];
+static size_t unique_file_count = 0;
+static int32_t path_hash_table[PATH_HASH_SLOTS]; /* 0 = empty, else file_idx + 1 */
+static char path_pool[PATH_POOL_SIZE];
+static uint32_t path_pool_used = 0;
 
 static vma_entry_t vmas[MAX_VMAS];
-static char path_pool[PATH_POOL_SIZE];
+static size_t vma_count = 0;
+static size_t fifo_file_cursor = 0;
+
 static uint64_t pagemap_buf[PAGEMAP_BATCH_PAGES];
-static unsigned char mincore_buf[PAGEMAP_BATCH_PAGES];
-static size_t sweep_cursor = 0;
+static char maps_read_buf[MAPS_READ_BUF_SIZE];
 
 typedef void *(*mmap_fn_t)(void *, size_t, int, int, int, off_t);
 typedef int (*close_fn_t)(int);
-typedef int (*fclose_fn_t)(FILE *);
 
 static mmap_fn_t real_mmap_fn = NULL;
 static close_fn_t real_close_fn = NULL;
-static fclose_fn_t real_fclose_fn = NULL;
 
 static int raw_open_readonly(const char *path, int extra_flags) {
   return (int)syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC | extra_flags, 0);
@@ -95,36 +106,38 @@ static uint64_t monotonic_ns(void) {
   return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-static int is_recently_mapped_vma(uintptr_t start) {
-  for (size_t i = 0; i < RECENT_MMAP_SLOTS; i++) {
-    if (atomic_load_explicit(&recent_mmap_addrs[i], memory_order_relaxed) == start) {
-      return 1;
-    }
+static long long parse_decimal(const char *s) {
+  while (*s == ' ' || *s == '\t') s++;
+  if (*s < '0' || *s > '9') return -1;
+  long long val = 0;
+  while (*s >= '0' && *s <= '9') {
+    val = val * 10 + (*s - '0');
+    s++;
   }
-  return 0;
+  return val;
 }
 
 static long long read_cgroup_current(void) {
   if (cgroup_current_fd < 0) return -1;
   char buf[64];
-  ssize_t n = pread(cgroup_current_fd, buf, sizeof(buf) - 1, 0);
+  ssize_t n = syscall(SYS_pread64, cgroup_current_fd, buf, sizeof(buf) - 1, (off_t)0);
   if (n <= 0) return -1;
   buf[n] = '\0';
-  return strtoll(buf, NULL, 10);
+  return parse_decimal(buf);
 }
 
 static long long read_cgroup_file_bytes(void) {
   if (cgroup_stat_fd < 0) return -1;
   char buf[1024];
-  ssize_t n = pread(cgroup_stat_fd, buf, sizeof(buf) - 1, 0);
+  ssize_t n = syscall(SYS_pread64, cgroup_stat_fd, buf, sizeof(buf) - 1, (off_t)0);
   if (n <= 0) return -1;
   buf[n] = '\0';
   const char *p = strstr(buf, "\nfile ");
   if (p != NULL) {
-    return strtoll(p + 6, NULL, 10);
+    return parse_decimal(p + 6);
   }
   if (strncmp(buf, "file ", 5) == 0) {
-    return strtoll(buf + 5, NULL, 10);
+    return parse_decimal(buf + 5);
   }
   return -1;
 }
@@ -142,247 +155,337 @@ static int is_target_lean_data_path(const char *path) {
   if (len >= 14 && strcmp(path + len - 14, ".olean.private") == 0) return 1;
   if (len >= 13 && strcmp(path + len - 13, ".olean.server") == 0) return 1;
   if (len >= 3 && strcmp(path + len - 3, ".ir") == 0) return 1;
-  if (strncmp(path, "/app/lean-project/.lake/", 24) == 0) return 1;
+  if (len >= 6 && strcmp(path + len - 6, ".ilean") == 0) return 1;
   return 0;
 }
 
-static size_t load_lean_vmas(void) {
-  FILE *fp = fopen("/proc/self/maps", "re");
-  if (!fp) return 0;
+static int resolve_fd_path(int fd, char *buf, size_t buf_size) {
+  if (fd < 0 || buf_size < 2) return 0;
+  char link_path[40] = "/proc/self/fd/";
+  char digits[16];
+  int dlen = 0;
+  unsigned int u = (unsigned int)fd;
+  do {
+    digits[dlen++] = (char)('0' + (u % 10));
+    u /= 10;
+  } while (u > 0 && dlen < (int)sizeof(digits));
 
-  size_t count = 0;
-  uint32_t pool_used = 0;
-  char line[1024];
-
-  while (fgets(line, sizeof(line), fp) != NULL && count < MAX_VMAS) {
-    uintptr_t start = 0;
-    uintptr_t end = 0;
-    char perms[8] = {0};
-    int path_pos = 0;
-
-    if (sscanf(line, "%lx-%lx %4s %*x %*x:%*x %*u %n", &start, &end, perms, &path_pos) < 3) {
-      continue;
-    }
-    if (path_pos <= 0 || end <= start || perms[0] != 'r' || perms[2] == 'x') {
-      continue;
-    }
-    char *path = line + path_pos;
-    while (*path == ' ' || *path == '\t') path++;
-    size_t plen = strlen(path);
-    while (plen > 0 && (path[plen - 1] == '\n' || path[plen - 1] == '\r')) {
-      path[--plen] = '\0';
-    }
-    if (plen == 0 || path[0] != '/' || !is_target_lean_data_path(path)) {
-      continue;
-    }
-    if (pool_used + plen + 1 > PATH_POOL_SIZE) {
-      break;
-    }
-
-    uint32_t offset = pool_used;
-    memcpy(path_pool + offset, path, plen + 1);
-    pool_used += (uint32_t)(plen + 1);
-
-    vmas[count].start = start;
-    vmas[count].end = end;
-    vmas[count].path_offset = offset;
-    vmas[count].is_readonly = (perms[1] == '-') ? 1 : 0;
-    count++;
+  int pos = 14;
+  while (dlen > 0) {
+    link_path[pos++] = digits[--dlen];
   }
+  link_path[pos] = '\0';
 
-  if (real_fclose_fn) real_fclose_fn(fp);
-  else fclose(fp);
-  return count;
+  ssize_t n = syscall(SYS_readlinkat, AT_FDCWD, link_path, buf, buf_size - 1);
+  if (n <= 0) return 0;
+  buf[n] = '\0';
+  return 1;
 }
 
-static size_t unmap_clean_file_pages(uintptr_t start, uintptr_t end, int is_readonly, int allow_rw_dontneed) {
-  if (end <= start) return 0;
+static uint64_t hash_path_str(const char *s) {
+  uint64_t h = 1469598103934665603ULL;
+  while (*s) {
+    h ^= (unsigned char)(*s++);
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static int32_t record_target_path_locked(const char *path) {
+  if (!is_target_lean_data_path(path)) return -1;
+
+  uint64_t h = hash_path_str(path);
+  size_t mask = PATH_HASH_SLOTS - 1;
+
+  for (size_t probe = 0; probe < PATH_HASH_SLOTS; probe++) {
+    size_t slot = (size_t)((h + probe) & mask);
+    int32_t entry = path_hash_table[slot];
+    if (entry == 0) {
+      if (unique_file_count >= MAX_UNIQUE_FILES) return -1;
+      size_t plen = strlen(path);
+      if (path_pool_used + plen + 2 > PATH_POOL_SIZE) return -1;
+
+      uint32_t offset = path_pool_used;
+      memcpy(path_pool + offset, path, plen);
+      path_pool[offset + plen] = '\0';
+      path_pool_used += (uint32_t)(plen + 1);
+
+      int32_t fidx = (int32_t)unique_file_count++;
+      unique_files[fidx].path_offset = offset;
+      unique_files[fidx].first_vma_idx = -1;
+      path_hash_table[slot] = fidx + 1;
+
+      if (touched_log_fd >= 0) {
+        char line_buf[1024];
+        if (plen + 1 < sizeof(line_buf)) {
+          memcpy(line_buf, path, plen);
+          line_buf[plen] = '\n';
+          syscall(SYS_write, touched_log_fd, line_buf, plen + 1);
+        }
+      }
+      return fidx;
+    }
+
+    int32_t existing_idx = entry - 1;
+    if (existing_idx >= 0 && (size_t)existing_idx < unique_file_count) {
+      const char *existing_path = path_pool + unique_files[existing_idx].path_offset;
+      if (strcmp(existing_path, path) == 0) {
+        return existing_idx;
+      }
+    }
+  }
+  return -1;
+}
+
+static int parse_hex_uintptr(const char **p, uintptr_t *out) {
+  const char *s = *p;
+  uintptr_t val = 0;
+  int digits = 0;
+  while (*s) {
+    char c = *s;
+    uintptr_t v;
+    if (c >= '0' && c <= '9') v = (uintptr_t)(c - '0');
+    else if (c >= 'a' && c <= 'f') v = (uintptr_t)(c - 'a' + 10);
+    else if (c >= 'A' && c <= 'F') v = (uintptr_t)(c - 'A' + 10);
+    else break;
+    val = (val << 4) | v;
+    s++;
+    digits++;
+  }
+  *p = s;
+  *out = val;
+  return digits > 0;
+}
+
+static void parse_maps_line_locked(char *line) {
+  const char *p = line;
+  uintptr_t start = 0;
+  uintptr_t end = 0;
+
+  if (!parse_hex_uintptr(&p, &start) || *p != '-') return;
+  p++;
+  if (!parse_hex_uintptr(&p, &end) || *p != ' ') return;
+  p++;
+  if (end <= start) return;
+
+  char r_perm = p[0];
+  char x_perm = (p[0] && p[1] && p[2]) ? p[2] : '\0';
+  if (r_perm != 'r' || x_perm == 'x') return;
+
+  const char *slash = strchr(p, '/');
+  if (!slash) return;
+
+  size_t plen = strlen(slash);
+  while (plen > 0 && (slash[plen - 1] == '\n' || slash[plen - 1] == '\r')) {
+    plen--;
+  }
+  if (plen == 0 || plen >= 1024) return;
+
+  char path_buf[1024];
+  memcpy(path_buf, slash, plen);
+  path_buf[plen] = '\0';
+
+  int32_t fidx = record_target_path_locked(path_buf);
+  if (fidx < 0 || vma_count >= MAX_VMAS) return;
+
+  int32_t vidx = (int32_t)vma_count++;
+  vmas[vidx].start = start;
+  vmas[vidx].end = end;
+  vmas[vidx].next_vma_idx = unique_files[fidx].first_vma_idx;
+  unique_files[fidx].first_vma_idx = vidx;
+}
+
+static void load_lean_vmas_locked(void) {
+  for (size_t i = 0; i < unique_file_count; i++) {
+    unique_files[i].first_vma_idx = -1;
+  }
+  vma_count = 0;
+
+  int fd = raw_open_readonly("/proc/self/maps", 0);
+  if (fd < 0) return;
+
+  size_t leftover = 0;
+  for (;;) {
+    ssize_t n = syscall(SYS_read, fd, maps_read_buf + leftover, MAPS_READ_BUF_SIZE - 1 - leftover);
+    if (n <= 0) break;
+    size_t total = leftover + (size_t)n;
+    maps_read_buf[total] = '\0';
+
+    char *line_start = maps_read_buf;
+    for (;;) {
+      char *nl = memchr(line_start, '\n', (size_t)(maps_read_buf + total - line_start));
+      if (!nl) break;
+      *nl = '\0';
+      parse_maps_line_locked(line_start);
+      line_start = nl + 1;
+    }
+
+    leftover = (size_t)(maps_read_buf + total - line_start);
+    if (leftover > 0) {
+      if (leftover >= MAPS_READ_BUF_SIZE - 1) {
+        leftover = 0;
+      } else {
+        memmove(maps_read_buf, line_start, leftover);
+      }
+    }
+  }
+
+  raw_close(fd);
+}
+
+static size_t unmap_clean_file_pages(uintptr_t start, uintptr_t end) {
+  if (end <= start || pagemap_fd < 0) return 0;
 
   size_t total_pages = (end - start) >> 12;
   size_t page_idx = 0;
-  size_t resident_pages_found = 0;
+  size_t resident_clean_pages = 0;
 
   while (page_idx < total_pages) {
     size_t batch = total_pages - page_idx;
     if (batch > PAGEMAP_BATCH_PAGES) batch = PAGEMAP_BATCH_PAGES;
 
     uintptr_t batch_addr = start + (page_idx << 12);
-    size_t batch_len = batch << 12;
+    off_t pm_offset = (off_t)((batch_addr >> 12) * sizeof(uint64_t));
+    ssize_t n = syscall(SYS_pread64, pagemap_fd, pagemap_buf, batch * sizeof(uint64_t), pm_offset);
+    if (n <= 0) {
+      break;
+    }
 
-    if (mincore((void *)batch_addr, batch_len, mincore_buf) == 0) {
-      int any_resident = 0;
-      for (size_t k = 0; k < batch; k++) {
-        if (mincore_buf[k] & 1) {
-          any_resident = 1;
-          resident_pages_found++;
-        }
-      }
-      if (!any_resident) {
-        page_idx += batch;
+    size_t got = (size_t)n / sizeof(uint64_t);
+    if (got == 0) break;
+
+    size_t i = 0;
+    while (i < got) {
+      if ((pagemap_buf[i] & PM_CLEAN_FILE_MASK) != PM_CLEAN_FILE_MASK) {
+        i++;
         continue;
       }
-    }
-
-    madvise((void *)batch_addr, batch_len, MADV_PAGEOUT);
-
-    if (is_readonly) {
-      madvise((void *)batch_addr, batch_len, MADV_DONTNEED);
-      resident_pages_found += batch;
-      page_idx += batch;
-      continue;
-    }
-
-    if (allow_rw_dontneed && pagemap_fd >= 0) {
-      off_t pm_offset = (off_t)((batch_addr >> 12) * sizeof(uint64_t));
-      ssize_t n = pread(pagemap_fd, pagemap_buf, batch * sizeof(uint64_t), pm_offset);
-      if (n > 0) {
-        size_t got = (size_t)n / sizeof(uint64_t);
-        size_t i = 0;
-        while (i < got) {
-          if ((pagemap_buf[i] & PM_CLEAN_FILE_MASK) != PM_CLEAN_FILE_MASK) {
-            i++;
-            continue;
-          }
-          size_t run_start = i;
-          while (i < got && (pagemap_buf[i] & PM_CLEAN_FILE_MASK) == PM_CLEAN_FILE_MASK) {
-            i++;
-          }
-          size_t run_pages = i - run_start;
-          resident_pages_found += run_pages;
-          void *span_addr = (void *)(batch_addr + (run_start << 12));
-          size_t span_len = run_pages << 12;
-          madvise(span_addr, span_len, MADV_DONTNEED);
-        }
+      size_t run_start = i;
+      while (i < got && (pagemap_buf[i] & PM_CLEAN_FILE_MASK) == PM_CLEAN_FILE_MASK) {
+        i++;
       }
+      size_t run_pages = i - run_start;
+      resident_clean_pages += run_pages;
+      void *span_addr = (void *)(batch_addr + (run_start << 12));
+      size_t span_len = run_pages << 12;
+      madvise(span_addr, span_len, MADV_DONTNEED);
     }
 
-    page_idx += batch;
+    page_idx += got;
   }
 
-  return resident_pages_found;
-}
-
-static void evict_dir_tree_fd(int dir_fd, int depth, int *files_evicted) {
-  if (depth > 16) {
-    raw_close(dir_fd);
-    return;
-  }
-  DIR *dir = fdopendir(dir_fd);
-  if (!dir) {
-    raw_close(dir_fd);
-    return;
-  }
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    const char *name = entry->d_name;
-    if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
-      continue;
-    }
-    if (entry->d_type == DT_DIR) {
-      int sub_fd = (int)syscall(SYS_openat, dir_fd, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW, 0);
-      if (sub_fd >= 0) {
-        evict_dir_tree_fd(sub_fd, depth + 1, files_evicted);
-      }
-    } else if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-      int fd = (int)syscall(SYS_openat, dir_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW, 0);
-      if (fd >= 0) {
-        raw_fadvise_dontneed(fd);
-        raw_close(fd);
-        (*files_evicted)++;
-      }
-    }
-  }
-  closedir(dir);
-}
-
-static void evict_dir_path(const char *root_path) {
-  int fd = raw_open_readonly(root_path, O_DIRECTORY);
-  if (fd >= 0) {
-    int count = 0;
-    evict_dir_tree_fd(fd, 0, &count);
-  }
+  return resident_clean_pages;
 }
 
 static int needs_eviction(void) {
   long long cur = read_cgroup_current();
   long long file = read_cgroup_file_bytes();
-  if (file >= MEM_FILE_HIGH_BYTES) return 1;
-  if (cur >= MEM_CURRENT_HIGH_BYTES && (file < 0 || file >= MEM_FILE_MIN_BYTES)) return 1;
+  if (file >= 0 && file < MEM_FILE_MIN_BYTES) {
+    return 0;
+  }
+
+  uint64_t now = monotonic_ns();
+  uint64_t last = atomic_load_explicit(&last_evict_ns, memory_order_relaxed);
+  uint64_t elapsed = (now > last) ? (now - last) : 0;
+
+  if (cur >= MEM_CURRENT_EMERGENCY_BYTES && elapsed >= EMERGENCY_COOLDOWN_NS) {
+    return 2;
+  }
+  if (elapsed < SWEEP_COOLDOWN_NS) {
+    return 0;
+  }
+  if (cur >= MEM_CURRENT_HIGH_BYTES || file >= MEM_FILE_HIGH_BYTES) {
+    return 1;
+  }
   return 0;
 }
 
 static int reached_low_target(void) {
   long long cur = read_cgroup_current();
   long long file = read_cgroup_file_bytes();
-  if (file >= 0 && file <= MEM_FILE_MIN_BYTES) return 1;
-  if (cur >= 0 && cur <= MEM_CURRENT_LOW_BYTES && (file < 0 || file <= MEM_FILE_LOW_BYTES)) return 1;
+  if (file >= 0 && file <= MEM_FILE_LOW_BYTES) return 1;
+  if (cur >= 0 && cur <= MEM_CURRENT_LOW_BYTES) return 1;
   return 0;
 }
 
-static void perform_eviction_locked(int force_all) {
-  size_t count = load_lean_vmas();
-  uint64_t now_ns = monotonic_ns();
-  uint64_t last_map = atomic_load_explicit(&last_mmap_ns, memory_order_relaxed);
-  int imports_settled = force_all || (now_ns > last_map && (now_ns - last_map) > 20000000ULL) ? 1 : 0;
+static void perform_eviction_locked(int mode) {
+  load_lean_vmas_locked();
 
-  if (count > 0) {
-    size_t idx = force_all ? 0 : (sweep_cursor % count);
-    size_t visited = 0;
-    size_t evicted_files = 0;
-
-    while (visited < count) {
-      const char *current_path = path_pool + vmas[idx].path_offset;
-      size_t group_pages = 0;
-
-      while (visited < count) {
-        const vma_entry_t *v = &vmas[idx];
-        const char *v_path = path_pool + v->path_offset;
-        if (strcmp(v_path, current_path) != 0) {
-          break;
-        }
-        if (force_all) {
-          madvise((void *)v->start, v->end - v->start, MADV_DONTNEED);
-          group_pages += (v->end - v->start) >> 12;
-        } else {
-          int allow_rw = imports_settled || !is_recently_mapped_vma(v->start);
-          group_pages += unmap_clean_file_pages(v->start, v->end, v->is_readonly, allow_rw);
-        }
-        idx = (idx + 1) % count;
-        visited++;
-      }
-
-      if (group_pages > 0) {
-        int fd = raw_open_readonly(current_path, 0);
-        if (fd >= 0) {
-          raw_fadvise_dontneed(fd);
-          raw_close(fd);
-        }
-        evicted_files++;
-        if (!force_all && (evicted_files & 15) == 0 && reached_low_target()) {
-          sweep_cursor = idx;
-          return;
-        }
+  if (mode == 3) {
+    /* Process exit: unmap and evict all recorded target files */
+    for (size_t i = 0; i < vma_count; i++) {
+      if (vmas[i].end > vmas[i].start) {
+        madvise((void *)vmas[i].start, vmas[i].end - vmas[i].start, MADV_DONTNEED);
       }
     }
-    sweep_cursor = idx;
+    for (size_t fidx = 0; fidx < unique_file_count; fidx++) {
+      const char *fpath = path_pool + unique_files[fidx].path_offset;
+      int fd = raw_open_readonly(fpath, 0);
+      if (fd >= 0) {
+        raw_fadvise_dontneed(fd);
+        raw_close(fd);
+      }
+    }
+    return;
   }
 
-  if (force_all || !reached_low_target()) {
-    evict_dir_path("/app/lean-project/.lake");
-    if (force_all) {
-      evict_dir_path("/opt/elan");
+  size_t protect_tail = (mode == 2) ? 32 : 128;
+  uint64_t max_sweep_bytes = (mode == 2) ? EMERGENCY_MAX_SWEEP_BYTES : NORMAL_MAX_SWEEP_BYTES;
+
+  if (unique_file_count <= protect_tail) {
+    atomic_store_explicit(&last_evict_ns, monotonic_ns(), memory_order_relaxed);
+    return;
+  }
+
+  size_t evictable_limit = unique_file_count - protect_tail;
+  size_t start_cursor = fifo_file_cursor % evictable_limit;
+  uint64_t evicted_bytes = 0;
+  size_t evicted_files = 0;
+
+  for (size_t visited = 0; visited < evictable_limit; visited++) {
+    size_t fidx = (start_cursor + visited) % evictable_limit;
+    int32_t vidx = unique_files[fidx].first_vma_idx;
+    if (vidx < 0) continue;
+
+    size_t file_pages = 0;
+    while (vidx >= 0) {
+      file_pages += unmap_clean_file_pages(vmas[vidx].start, vmas[vidx].end);
+      vidx = vmas[vidx].next_vma_idx;
+    }
+
+    if (file_pages > 0) {
+      const char *fpath = path_pool + unique_files[fidx].path_offset;
+      int fd = raw_open_readonly(fpath, 0);
+      if (fd >= 0) {
+        raw_fadvise_dontneed(fd);
+        raw_close(fd);
+      }
+      evicted_bytes += (uint64_t)file_pages << 12;
+      evicted_files++;
+
+      if (evicted_bytes >= max_sweep_bytes || ((evicted_files & 7) == 0 && reached_low_target())) {
+        fifo_file_cursor = (fidx + 1) % evictable_limit;
+        atomic_store_explicit(&last_evict_ns, monotonic_ns(), memory_order_relaxed);
+        return;
+      }
     }
   }
+
+  fifo_file_cursor = 0;
+  atomic_store_explicit(&last_evict_ns, monotonic_ns(), memory_order_relaxed);
 }
 
 static void maybe_evict(void) {
-  if (!atomic_load_explicit(&guard_active, memory_order_relaxed) || in_memguard || !needs_eviction()) {
+  if (!atomic_load_explicit(&guard_active, memory_order_relaxed) || in_memguard) {
     return;
   }
+  int mode = needs_eviction();
+  if (!mode) return;
   if (pthread_mutex_trylock(&evict_mutex) != 0) return;
   in_memguard = 1;
-  if (needs_eviction()) {
-    perform_eviction_locked(0);
+  mode = needs_eviction();
+  if (mode) {
+    perform_eviction_locked(mode);
   }
   in_memguard = 0;
   pthread_mutex_unlock(&evict_mutex);
@@ -392,7 +495,7 @@ static void *memguard_worker(void *arg) {
   (void)arg;
   struct timespec sleep_ts;
   sleep_ts.tv_sec = 0;
-  sleep_ts.tv_nsec = 6 * 1000 * 1000; /* 6 ms */
+  sleep_ts.tv_nsec = 25 * 1000 * 1000; /* 25 ms */
 
   while (atomic_load_explicit(&guard_active, memory_order_relaxed)) {
     nanosleep(&sleep_ts, NULL);
@@ -408,11 +511,18 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
   void *ret = real_mmap_fn(addr, length, prot, flags, fd, offset);
   if (atomic_load_explicit(&guard_active, memory_order_relaxed) &&
       !in_memguard && ret != MAP_FAILED && fd >= 0 && length >= 4096) {
-    size_t slot = atomic_fetch_add_explicit(&recent_mmap_cursor, 1, memory_order_relaxed) & (RECENT_MMAP_SLOTS - 1);
-    atomic_store_explicit(&recent_mmap_addrs[slot], (uintptr_t)ret, memory_order_relaxed);
-    atomic_store_explicit(&last_mmap_ns, monotonic_ns(), memory_order_relaxed);
+    in_memguard = 1;
+    char path_buf[1024];
+    if (resolve_fd_path(fd, path_buf, sizeof(path_buf)) && is_target_lean_data_path(path_buf)) {
+      if (pthread_mutex_trylock(&evict_mutex) == 0) {
+        record_target_path_locked(path_buf);
+        pthread_mutex_unlock(&evict_mutex);
+      }
+    }
+    in_memguard = 0;
+
     size_t acc = atomic_fetch_add_explicit(&mapped_bytes_since_check, length, memory_order_relaxed) + length;
-    if (acc >= (4 * 1024 * 1024)) {
+    if (acc >= (8 * 1024 * 1024)) {
       atomic_store_explicit(&mapped_bytes_since_check, 0, memory_order_relaxed);
       maybe_evict();
     }
@@ -430,41 +540,57 @@ int close(int fd) {
   }
   if (atomic_load_explicit(&guard_active, memory_order_relaxed) &&
       !in_memguard && fd >= 3 &&
-      fd != cgroup_current_fd && fd != cgroup_stat_fd && fd != pagemap_fd) {
-    int fl = fcntl(fd, F_GETFL);
-    if (fl != -1 && (fl & O_ACCMODE) == O_RDONLY) {
+      fd != cgroup_current_fd && fd != cgroup_stat_fd &&
+      fd != pagemap_fd && fd != touched_log_fd) {
+    in_memguard = 1;
+    char path_buf[1024];
+    if (resolve_fd_path(fd, path_buf, sizeof(path_buf)) && is_target_lean_data_path(path_buf)) {
       raw_fadvise_dontneed(fd);
-      size_t cnt = atomic_fetch_add_explicit(&closed_files_since_check, 1, memory_order_relaxed) + 1;
-      if ((cnt & 15) == 0) {
-        maybe_evict();
+      if (pthread_mutex_trylock(&evict_mutex) == 0) {
+        record_target_path_locked(path_buf);
+        pthread_mutex_unlock(&evict_mutex);
       }
     }
+    in_memguard = 0;
   }
   return real_close_fn(fd);
 }
 
-int fclose(FILE *stream) {
-  if (!real_fclose_fn) {
-    real_fclose_fn = (fclose_fn_t)dlsym(RTLD_NEXT, "fclose");
+static void memguard_cleanup_on_exit(void) {
+  if (!atomic_exchange_explicit(&guard_active, 0, memory_order_acq_rel)) {
+    return;
   }
-  if (atomic_load_explicit(&guard_active, memory_order_relaxed) &&
-      !in_memguard && stream != NULL) {
-    int fd = fileno(stream);
-    if (fd >= 3 && fd != cgroup_current_fd && fd != cgroup_stat_fd && fd != pagemap_fd) {
-      int fl = fcntl(fd, F_GETFL);
-      if (fl != -1 && (fl & O_ACCMODE) == O_RDONLY) {
-        raw_fadvise_dontneed(fd);
-      }
-    }
+  pthread_mutex_lock(&evict_mutex);
+  in_memguard = 1;
+  perform_eviction_locked(3);
+  raw_close(touched_log_fd);
+  touched_log_fd = -1;
+  raw_close(pagemap_fd);
+  pagemap_fd = -1;
+  raw_close(cgroup_current_fd);
+  cgroup_current_fd = -1;
+  raw_close(cgroup_stat_fd);
+  cgroup_stat_fd = -1;
+  in_memguard = 0;
+  pthread_mutex_unlock(&evict_mutex);
+}
+
+void _exit(int status) {
+  memguard_cleanup_on_exit();
+  syscall(SYS_exit_group, status);
+  for (;;) {
+    syscall(SYS_exit, status);
   }
-  return real_fclose_fn(stream);
+}
+
+void _Exit(int status) {
+  _exit(status);
 }
 
 __attribute__((constructor))
 static void memguard_init(void) {
   real_mmap_fn = (mmap_fn_t)dlsym(RTLD_NEXT, "mmap");
   real_close_fn = (close_fn_t)dlsym(RTLD_NEXT, "close");
-  real_fclose_fn = (fclose_fn_t)dlsym(RTLD_NEXT, "fclose");
 
   if (!program_invocation_short_name || strcmp(program_invocation_short_name, "lean") != 0) {
     return;
@@ -472,11 +598,17 @@ static void memguard_init(void) {
   cgroup_current_fd = raw_open_readonly("/sys/fs/cgroup/memory.current", 0);
   cgroup_stat_fd = raw_open_readonly("/sys/fs/cgroup/memory.stat", 0);
   pagemap_fd = raw_open_readonly("/proc/self/pagemap", 0);
+  touched_log_fd = (int)syscall(
+      SYS_openat,
+      AT_FDCWD,
+      TOUCHED_LOG_PATH,
+      O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+      0600);
   if (cgroup_current_fd < 0) {
     return;
   }
-  atomic_store_explicit(&last_mmap_ns, monotonic_ns(), memory_order_relaxed);
-  atomic_store_explicit(&guard_active, 1, memory_order_relaxed);
+  atomic_store_explicit(&last_evict_ns, monotonic_ns(), memory_order_relaxed);
+  atomic_store_explicit(&guard_active, 1, memory_order_release);
 
   pthread_t tid;
   pthread_attr_t attr;
@@ -490,13 +622,5 @@ static void memguard_init(void) {
 
 __attribute__((destructor))
 static void memguard_fini(void) {
-  if (!atomic_exchange_explicit(&guard_active, 0, memory_order_relaxed)) {
-    return;
-  }
-  if (pthread_mutex_trylock(&evict_mutex) == 0) {
-    in_memguard = 1;
-    perform_eviction_locked(1);
-    in_memguard = 0;
-    pthread_mutex_unlock(&evict_mutex);
-  }
+  memguard_cleanup_on_exit();
 }

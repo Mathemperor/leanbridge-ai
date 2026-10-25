@@ -11,6 +11,35 @@
 #define POSIX_FADV_DONTNEED 4
 #endif
 
+#define TOUCHED_LOG_PATH "/tmp/leanbridge-touched-files.txt"
+
+static void evict_single_file(const char *path) {
+  if (!path || path[0] != '/') return;
+  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd >= 0) {
+    posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+    close(fd);
+  }
+}
+
+static void evict_from_touched_log(void) {
+  FILE *fp = fopen(TOUCHED_LOG_PATH, "re");
+  if (!fp) return;
+
+  char line[1024];
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+      line[--len] = '\0';
+    }
+    if (len > 0) {
+      evict_single_file(line);
+    }
+  }
+  fclose(fp);
+  unlink(TOUCHED_LOG_PATH);
+}
+
 static void walk_and_evict(int dir_fd, int depth) {
   if (depth > 20) {
     close(dir_fd);
@@ -51,15 +80,11 @@ static void evict_root(const char *path) {
 }
 
 int main(int argc, char **argv) {
-  if (argc <= 1) {
-    evict_root("/app/lean-project/.lake");
-    evict_root("/opt/elan");
-    evict_root("/app/node_modules");
-    evict_root("/usr/local/lib/node_modules");
-    return 0;
-  }
-  for (int i = 1; i < argc; i++) {
-    evict_root(argv[i]);
+  evict_from_touched_log();
+  if (argc > 2 && strcmp(argv[1], "--walk") == 0) {
+    for (int i = 2; i < argc; i++) {
+      evict_root(argv[i]);
+    }
   }
   return 0;
 }

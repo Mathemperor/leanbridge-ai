@@ -32,13 +32,17 @@ function record(name, data) {
   console.log(JSON.stringify({ check: name, ...data }));
 }
 
-async function proof(name, code) {
+async function proof(checkName, code) {
   const result = await compile(code);
-  record(name, { httpStatus: result.status, status: result.body.status, verification: result.body.verification });
-  assert.equal(result.status, 200, `${name}: HTTP status`);
-  assert.equal(result.body.status, 'verified', `${name}: real proof did not verify`);
-  assert.equal(result.body.verification?.ok, true, `${name}: compiler success required`);
-  assert(!/sorryAx/.test(result.body.verification?.output || ''), `${name}: placeholder axiom`);
+  let memoryCurrentBytes = null;
+  let memoryPeakBytes = null;
+  try { memoryCurrentBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.current'])); } catch {}
+  try { memoryPeakBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.peak'])); } catch {}
+  record(checkName, { httpStatus: result.status, status: result.body.status, verification: result.body.verification, memoryCurrentBytes, memoryPeakBytes });
+  assert.equal(result.status, 200, `${checkName}: HTTP status`);
+  assert.equal(result.body.status, 'verified', `${checkName}: real proof did not verify`);
+  assert.equal(result.body.verification?.ok, true, `${checkName}: compiler success required`);
+  assert(!/sorryAx/.test(result.body.verification?.output || ''), `${checkName}: placeholder axiom`);
 }
 
 async function compile(code) {
@@ -125,6 +129,9 @@ try {
   report.success = false;
   report.error = String(error.message || error).replaceAll(token, '[redacted]');
   if (created) {
+    try { report.memoryCurrentAfterBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.current'])); } catch {}
+    try { report.memoryPeakBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.peak'])); } catch {}
+    try { report.memoryEvents = docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.events']); } catch {}
     try { report.runtimeLogs = docker(['logs', '--tail', '25', name]).replaceAll(token, '[redacted]'); } catch { /* Keep original failure. */ }
   }
   console.error(report.error);
