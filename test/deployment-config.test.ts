@@ -10,14 +10,14 @@ async function read(relativePath: string): Promise<string> {
 
 describe("cloud deployment configuration", () => {
   it("pins the Lean and mathlib releases", async () => {
-    expect((await read("lean-project/lean-toolchain")).trim()).toBe("leanprover/lean4:v4.24.0");
-    await expect(read("lean-project/lakefile.toml")).resolves.toMatch(/rev\s*=\s*"v4\.24\.0"/);
+    expect((await read("lean-project/lean-toolchain")).trim()).toBe("leanprover/lean4:v4.35.0");
+    await expect(read("lean-project/lakefile.toml")).resolves.toMatch(/rev\s*=\s*"v4\.35\.0"/);
     await expect(read("lean-project/LeanBridge/Basic.lean")).resolves.toContain("import Mathlib");
     const manifest = JSON.parse(await read("lean-project/lake-manifest.json")) as {
       packages: Array<{ name: string; rev: string }>;
     };
     expect(manifest.packages.find((entry) => entry.name === "mathlib")?.rev)
-      .toBe("f897ebcf72cd16f89ab4577d0c826cd14afaafc7");
+      .toBe("56a005855ea17e0b0958f73ec801ae140b0a1679");
   });
 
   it("builds a non-root cloud runtime without embedding secrets", async () => {

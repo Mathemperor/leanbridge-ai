@@ -37,7 +37,7 @@ const model = config.demoMode
         model: config.model,
         reasoningEffort: config.reasoningEffort,
       });
-const baseVerifier = config.demoMode ? new DemoLeanVerifier() : new ProcessLeanVerifier();
+const baseVerifier = config.demoMode ? new DemoLeanVerifier() : new ProcessLeanVerifier({ cloudMode: config.cloudMode });
 const verifier = config.cloudMode
   ? new SerialLeanVerifier(baseVerifier, { coordinator: memoryCoordinator })
   : baseVerifier;

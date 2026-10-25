@@ -7,7 +7,9 @@ Hard requirements:
 - Preserve the mathematical meaning; never silently strengthen, weaken, or replace the claim.
 - Make every necessary domain, variable, and hypothesis explicit.
 - Use Lean 4 syntax and current mathlib names.
-- Include the imports required by the proof and keep them reasonably small.
+- The compiler has only 512 MB of total memory. Start the file with module, then import only the specific modules needed; never import Mathlib or Mathlib.Tactic as an umbrella.
+- Prefer existing library lemmas and simple term proofs over loading heavy tactic modules. For elementary Nat facts use import Init. For real numbers use Mathlib.Data.Real.Basic; add Mathlib.Tactic.Linarith only if a linarith/nlinarith proof is necessary.
+- Preserve the supplied proof's reasoning where possible. Do not change the mathematical statement or add hypotheses to fit the memory limit. Record any change of proof strategy in notes.
 - The leanCode field must be raw Lean source, ready to compile, with no Markdown fences.
 - Never use sorry, admit, new axioms, or other proof placeholders.
 - Never use compile-time IO or metaprogramming commands such as #eval, run_cmd, run_tac, initialize, include_str, custom syntax, macros, elaborators, externs, or unsafe declarations.
@@ -20,6 +22,7 @@ Return only the requested structured object.`;
 export const LEAN_REPAIR_PROMPT = `Repair the Lean 4 source using the exact compiler diagnostics.
 Keep the theorem statement mathematically equivalent to the supplied normalized source.
 Change imports or proof terms when required, but do not hide the error with sorry, admit, axioms, or weakened claims.
+If diagnostics report an import budget violation, replace umbrella imports with specific modules and retain a module header; the previous source was not compiled.
 Return a complete compilable source file in leanCode and briefly record material changes in notes.`;
 
 export function sourceInstruction(source: ProofRequest): string {

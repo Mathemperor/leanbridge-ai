@@ -26,7 +26,7 @@ ENV ELAN_HOME=/opt/elan
 ENV PATH="${ELAN_HOME}/bin:${PATH}"
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://elan.lean-lang.org/elan-init.sh \
-  | sh -s -- -y --default-toolchain leanprover/lean4:v4.24.0
+  | sh -s -- -y --default-toolchain leanprover/lean4:v4.35.0
 
 WORKDIR /app
 COPY lean-project ./lean-project

@@ -35,6 +35,38 @@ afterAll(async () => {
 });
 
 describe("ProcessLeanVerifier", () => {
+  it.each([
+    "import Mathlib\nexample : True := by trivial",
+    "import Mathlib.Tactic\nexample : True := by trivial",
+    "module\npublic import /- outer /- nested -/ comment -/ Mathlib\nexample : True := by trivial",
+    "import\n  Mathlib -- full library\nexample : True := by trivial",
+  ])("refuses umbrella imports before launching the cloud compiler: %s", async (code) => {
+    const verifier = new ProcessLeanVerifier({ cloudMode: true });
+    const result = await verifier.verify(code, {
+      projectPath,
+      leanCommand: resolve(projectPath, "must-not-launch"),
+      timeoutMs: 1_000,
+    });
+    expect(result).toMatchObject({ ok: false, status: "failed", command: "Lean import budget check" });
+    expect(result.output).toContain("512 MB");
+    expect(result.output).toContain("Mathlib.Data.Real.Basic");
+    expect(result.exitCode).toBeUndefined();
+  });
+
+  it("ignores umbrella imports in comments and strings, and allows focused modules", async () => {
+    const verifier = new ProcessLeanVerifier({ cloudMode: true });
+    const code = '/- import Mathlib /- nested -/ -/\nimport Mathlib.Data.Real.Basic\nimport Mathlib.Tactic.Linarith\n-- import Mathlib.Tactic\ndef text := "import Mathlib"\nexample : True := by trivial';
+    const result = await verifier.verify(code, { projectPath, leanCommand: fakeLean, timeoutMs: 1_000 });
+    expect(result).toMatchObject({ ok: true, status: "verified", exitCode: 0 });
+  });
+
+  it("keeps full imports available outside the memory-limited cloud runtime", async () => {
+    const result = await new ProcessLeanVerifier().verify("import Mathlib\nexample : True := by trivial", {
+      projectPath, leanCommand: fakeLean, timeoutMs: 1_000,
+    });
+    expect(result).toMatchObject({ ok: true, status: "verified", exitCode: 0 });
+  });
+
   it("does not pass application secrets to Lean", () => {
     const env = leanSubprocessEnvironment({
       PATH: "/usr/bin",

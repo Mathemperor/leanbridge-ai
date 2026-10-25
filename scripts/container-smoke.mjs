@@ -11,7 +11,9 @@ const name = `leanbridge-smoke-${process.pid}-${randomBytes(4).toString('hex')}`
 const token = randomBytes(32).toString('hex');
 const evidencePath = join(process.env.RUNNER_TEMP || tmpdir(), 'leanbridge-container-smoke.json');
 const coldCache = process.env.LEANBRIDGE_COLD_CACHE === '1';
-const report = { image, sourceRevision: process.env.GITHUB_SHA || null, startedAt: new Date().toISOString(), coldHostCache: coldCache, limits: { memoryBytes: 512000000, swapBytes: 0, cpus: 1 }, checks: [] };
+// Leave 64 MB of headroom below Railway's 512 MB production limit.
+const memoryLimitBytes = 448000000;
+const report = { image, sourceRevision: process.env.GITHUB_SHA || null, startedAt: new Date().toISOString(), coldHostCache: coldCache, limits: { memoryBytes: memoryLimitBytes, swapBytes: 0, cpus: 1 }, checks: [] };
 const docker = (args, options = {}) => execFileSync('docker', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 512 * 1024, ...options }).trim();
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 let created = false;
@@ -58,7 +60,7 @@ async function compile(code) {
   assert(Date.now() - start < 20000, 'Submission must fit the Site proxy deadline');
   const id = result.body.id;
   assert.match(id, /^[a-zA-Z0-9-]+$/);
-  const deadline = Date.now() + 150000;
+  const deadline = Date.now() + 250000;
   while (!['verified', 'failed'].includes(result.body.status) && Date.now() < deadline) {
     await delay(1000);
     result = await request(`/api/proofs/${id}`);
@@ -71,7 +73,7 @@ try {
   report.imageSizeBytes = Number(docker(['image', 'inspect', '--format', '{{.Size}}', image]));
   report.imageRevision = docker(['image', 'inspect', '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}', image]);
   if (process.env.GITHUB_SHA) assert.equal(report.imageRevision, process.env.GITHUB_SHA, 'Built source revision');
-  docker(['run', '--detach', '--name', name, '--memory=512000000', '--memory-swap=512000000', '--cpus=1', '--pids-limit=256',
+  docker(['run', '--detach', '--name', name, `--memory=${memoryLimitBytes}`, `--memory-swap=${memoryLimitBytes}`, '--cpus=1', '--pids-limit=256',
     '--publish', '127.0.0.1::8080', '--env', 'PORT=8080', '--env', 'MODEL_PROVIDER=codex', '--env', 'CLOUD_MODE=true',
     '--env', 'CODEX_MODEL=gpt-6-astra', '--env', 'CODEX_REASONING_EFFORT=high', '--env', 'LEANBRIDGE_BACKEND_TOKEN', image],
   { env: { ...process.env, LEANBRIDGE_BACKEND_TOKEN: token } });
@@ -90,6 +92,11 @@ try {
   }
   assert(healthy, 'Container must become healthy');
   record('public-health', { ok: true });
+  const leanBinary = docker(['exec', name, 'cat', '/app/lean-project/.lean-bin']);
+  assert.match(leanBinary, /^\/opt\/elan\/toolchains\/[^\s]+\/bin\/lean$/);
+  const leanVersion = docker(['exec', name, leanBinary, '--version']);
+  assert.match(leanVersion, /version 4\.35\.0/);
+  record('actual-lean-version', { leanVersion });
   const denied = await request('/api/config', undefined, false);
   assert.equal(denied.status, 401, 'Anonymous protected endpoint must reject');
   record('anonymous-protected-endpoint', { httpStatus: denied.status });
@@ -108,8 +115,14 @@ try {
   if (memoryAfterReadyBytes !== null) {
     assert(memoryAfterReadyBytes < 160_000_000, `Idle memory after /api/ready should stay below 160 MB, got ${memoryAfterReadyBytes}`);
   }
-  await proof('mathlib-nat-original-regression', 'import Mathlib.Data.Nat.Basic\n\ntheorem ci_nat_add_zero (n : Nat) : n + 0 = n := by\n  rfl\n\n#print axioms ci_nat_add_zero\n');
-  await proof('mathlib-real-inequality', 'import Mathlib.Data.Real.Basic\nimport Mathlib.Tactic.Linarith\n\ntheorem ci_real_inequality (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by\n  nlinarith [sq_nonneg (a-b)]\n\n#print axioms ci_real_inequality\n');
+  const umbrella = await compile('import Mathlib\nexample : True := by trivial');
+  assert.equal(umbrella.body.verification?.command, 'Lean import budget check');
+  assert.equal(umbrella.body.verification?.ok, false);
+  assert.equal(umbrella.body.verification?.durationMs, 0);
+  record('umbrella-import-stopped-before-spawn', { verification: umbrella.body.verification });
+  await proof('mathlib-nat-module', 'module\nimport Mathlib.Data.Nat.Basic\n\ntheorem ci_nat_add_zero (n : Nat) : n + 0 = n := by\n  rfl\n\n#print axioms ci_nat_add_zero\n');
+  await proof('mathlib-real-inequality', 'module\nimport Mathlib.Data.Real.Basic\nimport Mathlib.Tactic.Linarith\n\ntheorem ci_real_inequality (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by\n  nlinarith [sq_nonneg (a-b)]\n\n#print axioms ci_real_inequality\n');
+  await proof('mathlib-real-single-module', 'module\nimport Mathlib.Data.Real.Basic\n\ntheorem ci_real_lemma (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by\n  exact two_mul_le_add_sq a b\n\n#print axioms ci_real_lemma\n');
   const invalid = await compile('example : (1 : Nat) = 2 := by rfl');
   assert.equal(invalid.status, 200);
   assert.equal(invalid.body.status, 'failed');
@@ -124,6 +137,9 @@ try {
   try { report.memoryCurrentAfterBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.current'])); } catch { report.memoryCurrentAfterBytes = null; }
   try { report.memoryPeakBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.peak'])); } catch { report.memoryPeakBytes = null; }
   try { report.memoryEvents = docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.events']); } catch { report.memoryEvents = null; }
+  report.compilationMemory = docker(['logs', name]).split('\n')
+    .filter(line => line.startsWith('{"event":"lean-verification-memory"'))
+    .map(line => JSON.parse(line));
   report.success = true;
 } catch (error) {
   report.success = false;

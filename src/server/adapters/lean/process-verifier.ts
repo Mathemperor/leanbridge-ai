@@ -7,6 +7,8 @@ import type { VerificationResult } from "@shared/proof";
 import type { LeanVerifier, VerifyOptions } from "@server/domain/ports";
 import { triggerGarbageCollection } from "@server/domain/runtime-memory";
 import { parseLeanOutput } from "./diagnostics";
+import { cloudImportBudgetDiagnostic } from "./import-budget";
+import { startMemorySampler } from "./memory-sampler";
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const LAKE_MARKERS = ["lakefile.lean", "lakefile.toml", "lakefile"];
@@ -137,7 +139,20 @@ export class PinnedLeanReadinessVerifier implements LeanVerifier {
 }
 
 export class ProcessLeanVerifier implements LeanVerifier {
+  constructor(private readonly runtime: { cloudMode?: boolean } = {}) {}
+
   async verify(code: string, options: VerifyOptions = {}): Promise<VerificationResult> {
+    const importDiagnostic = this.runtime.cloudMode ? cloudImportBudgetDiagnostic(code) : undefined;
+    if (importDiagnostic) {
+      return {
+        ok: false,
+        status: "failed",
+        command: "Lean import budget check",
+        durationMs: 0,
+        output: importDiagnostic,
+        diagnostics: [{ severity: "error", message: importDiagnostic }],
+      };
+    }
     triggerGarbageCollection();
     const started = Date.now();
     const projectPath = resolve(options.projectPath ?? process.cwd());
@@ -153,7 +168,10 @@ export class ProcessLeanVerifier implements LeanVerifier {
       const args = useLake ? ["env", "lean", sourcePath] : [sourcePath];
       const commandDisplay = [basename(command), ...args.map((arg) => basename(arg))].join(" ");
 
-      return await new Promise<VerificationResult>((resolveResult) => {
+      const memorySampler = this.runtime.cloudMode ? startMemorySampler() : undefined;
+      let result: VerificationResult;
+      try {
+        result = await new Promise<VerificationResult>((resolveResult) => {
         let stdout = "";
         let stderr = "";
         let settled = false;
@@ -213,7 +231,12 @@ export class ProcessLeanVerifier implements LeanVerifier {
             ...(exitCode === null ? {} : { exitCode }),
           });
         });
-      });
+        });
+      } finally {
+        const memory = memorySampler?.stop();
+        if (memory) console.info(JSON.stringify({ event: "lean-verification-memory", durationMs: Date.now() - started, ...memory }));
+      }
+      return result;
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }
