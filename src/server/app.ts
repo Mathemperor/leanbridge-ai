@@ -5,6 +5,7 @@ import { z } from "zod";
 import { proofRequestSchema } from "@shared/proof";
 import { resolveCodexSettings } from "@shared/codex-options";
 import type { ProofPipeline } from "./domain/proof-pipeline";
+import { ProofJobBusyError } from "./domain/proof-pipeline";
 import type { LeanVerifier, VerifyOptions } from "./domain/ports";
 import { JobStoreCapacityError } from "./domain/job-store";
 import type { PublicRuntimeConfig } from "./config";
@@ -75,7 +76,11 @@ export function createApp(options: CreateAppOptions): Express {
   app.post("/api/proofs/manual", async (request,response) => {
     const parsed=manualVerificationSchema.safeParse(request.body);
     if(!parsed.success){response.status(400).json({error:"Lean 代码无效"});return;}
-    try {response.json(await options.pipeline.verifyCode(parsed.data.code));}
+    try {
+      const job=options.pipeline.startVerifyCode(parsed.data.code);
+      setImmediate(()=>void options.pipeline.runVerification(job.id));
+      response.status(202).json(job);
+    }
     catch(error){response.status(error instanceof JobStoreCapacityError?429:400).json({error:error instanceof JobStoreCapacityError?"当前证明任务过多，请稍后重试":"代码包含不允许的命令或证明占位符"});}
   });
 
@@ -133,9 +138,11 @@ export function createApp(options: CreateAppOptions): Express {
       return;
     }
     try {
-      response.json(await options.pipeline.reverify(request.params.id, parsed.data.code));
+      const job=options.pipeline.startReverify(request.params.id, parsed.data.code);
+      setImmediate(()=>void options.pipeline.runVerification(job.id));
+      response.status(202).json(job);
     } catch (error) {
-      response.status(400).json({ error: error instanceof Error ? error.message : "无法重新验证" });
+      response.status(error instanceof ProofJobBusyError ? 409 : 400).json({ error: error instanceof Error ? error.message : "无法重新验证" });
     }
   });
 

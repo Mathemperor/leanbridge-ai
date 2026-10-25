@@ -44,6 +44,7 @@ export function LeanEditor(props: LeanEditorProps) {
           id="lean-code"
           className="code-editor"
           value={props.code}
+          disabled={props.busy}
           onChange={(event) => props.onCodeChange(event.target.value)}
           placeholder={"-- 生成的 Lean 4 代码会出现在这里\n\nimport Mathlib\n\ntheorem example : True := by\n  trivial"}
           spellCheck={false}

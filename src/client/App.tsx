@@ -101,10 +101,11 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
     try {
       const updated = await api.reverify(job.id, code);
       setJob(updated);
+      setPollFailures(0);
+      if (terminalStatuses.has(updated.status)) setSubmitting(false);
       if (updated.translation?.leanCode) setCode(updated.translation.leanCode);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "无法重新验证");
-    } finally {
       setSubmitting(false);
     }
   };
@@ -192,7 +193,7 @@ export function App({ api = browserApi, pollIntervalMs = 850 }: AppProps) {
           />
           <LeanEditor
             code={code}
-            busy={submitting}
+            busy={submitting || Boolean(job && !terminalStatuses.has(job.status))}
             hasJob={Boolean(job)}
             onCodeChange={setCode}
             onReverify={() => void reverify()}

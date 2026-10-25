@@ -10,7 +10,8 @@ assert(image && /^[a-zA-Z0-9][a-zA-Z0-9._/@:-]+$/.test(image), 'Pass the built i
 const name = `leanbridge-smoke-${process.pid}-${randomBytes(4).toString('hex')}`;
 const token = randomBytes(32).toString('hex');
 const evidencePath = join(process.env.RUNNER_TEMP || tmpdir(), 'leanbridge-container-smoke.json');
-const report = { image, sourceRevision: process.env.GITHUB_SHA || null, startedAt: new Date().toISOString(), limits: { memoryMiB: 512, swapMiB: 0, cpus: 1 }, checks: [] };
+const coldCache = process.env.LEANBRIDGE_COLD_CACHE === '1';
+const report = { image, sourceRevision: process.env.GITHUB_SHA || null, startedAt: new Date().toISOString(), coldHostCache: coldCache, limits: { memoryBytes: 512000000, swapBytes: 0, cpus: 1 }, checks: [] };
 const docker = (args, options = {}) => execFileSync('docker', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 512 * 1024, ...options }).trim();
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 let created = false;
@@ -32,7 +33,7 @@ function record(name, data) {
 }
 
 async function proof(name, code) {
-  const result = await request('/api/proofs/manual', { code });
+  const result = await compile(code);
   record(name, { httpStatus: result.status, status: result.body.status, verification: result.body.verification });
   assert.equal(result.status, 200, `${name}: HTTP status`);
   assert.equal(result.body.status, 'verified', `${name}: real proof did not verify`);
@@ -40,11 +41,33 @@ async function proof(name, code) {
   assert(!/sorryAx/.test(result.body.verification?.output || ''), `${name}: placeholder axiom`);
 }
 
+async function compile(code) {
+  if (coldCache) {
+    assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Cache eviction only on disposable GitHub runners');
+    assert.equal(process.env.RUNNER_OS, 'Linux');
+    execFileSync('sudo', ['sync'], { timeout: 30000, stdio: 'ignore' });
+    execFileSync('sudo', ['tee', '/proc/sys/vm/drop_caches'], { input: '3\n', timeout: 30000, stdio: ['pipe', 'ignore', 'pipe'] });
+  }
+  const start = Date.now();
+  let result = await request('/api/proofs/manual', { code });
+  assert.equal(result.status, 202, 'Compilation must return an asynchronous job');
+  assert(Date.now() - start < 20000, 'Submission must fit the Site proxy deadline');
+  const id = result.body.id;
+  assert.match(id, /^[a-zA-Z0-9-]+$/);
+  const deadline = Date.now() + 150000;
+  while (!['verified', 'failed'].includes(result.body.status) && Date.now() < deadline) {
+    await delay(1000);
+    result = await request(`/api/proofs/${id}`);
+    assert.equal(result.status, 200, 'Polling must retain the job');
+  }
+  return result;
+}
+
 try {
   report.imageSizeBytes = Number(docker(['image', 'inspect', '--format', '{{.Size}}', image]));
   report.imageRevision = docker(['image', 'inspect', '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}', image]);
   if (process.env.GITHUB_SHA) assert.equal(report.imageRevision, process.env.GITHUB_SHA, 'Built source revision');
-  docker(['run', '--detach', '--name', name, '--memory=512m', '--memory-swap=512m', '--cpus=1', '--pids-limit=256',
+  docker(['run', '--detach', '--name', name, '--memory=512000000', '--memory-swap=512000000', '--cpus=1', '--pids-limit=256',
     '--publish', '127.0.0.1::8080', '--env', 'PORT=8080', '--env', 'MODEL_PROVIDER=codex', '--env', 'CLOUD_MODE=true',
     '--env', 'CODEX_MODEL=gpt-6-astra', '--env', 'CODEX_REASONING_EFFORT=high', '--env', 'LEANBRIDGE_BACKEND_TOKEN', image],
   { env: { ...process.env, LEANBRIDGE_BACKEND_TOKEN: token } });
@@ -74,7 +97,7 @@ try {
   record('codex-only-config-and-catalog', { provider: config.body.provider, lean: config.body.lean, modelCount: config.body.codexCatalog.models.length });
   await proof('mathlib-nat-original-regression', 'import Mathlib.Data.Nat.Basic\n\ntheorem ci_nat_add_zero (n : Nat) : n + 0 = n := by\n  rfl\n\n#print axioms ci_nat_add_zero\n');
   await proof('mathlib-real-inequality', 'import Mathlib.Data.Real.Basic\nimport Mathlib.Tactic.Linarith\n\ntheorem ci_real_inequality (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by\n  nlinarith [sq_nonneg (a-b)]\n\n#print axioms ci_real_inequality\n');
-  const invalid = await request('/api/proofs/manual', { code: 'example : (1 : Nat) = 2 := by rfl' });
+  const invalid = await compile('example : (1 : Nat) = 2 := by rfl');
   assert.equal(invalid.status, 200);
   assert.equal(invalid.body.status, 'failed');
   assert.equal(invalid.body.verification?.ok, false);

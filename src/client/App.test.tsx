@@ -58,6 +58,21 @@ function fakeApi(leanMode: "demo" | "local" | "cloud" = "demo"): LeanBridgeApi {
 }
 
 describe("LeanBridge workbench", () => {
+  it("keeps the editor locked after asynchronous re-verification is accepted", async () => {
+    const api=fakeApi();
+    const user=userEvent.setup();
+    render(<App api={api} pollIntervalMs={0}/>);
+    await user.type(screen.getByLabelText("LaTeX 证明"),"Truth");
+    await user.click(screen.getByRole("button",{name:"生成并验证"}));
+    await screen.findByText("Lean 验证通过");
+    const {verification:_previous,...running}=verified;
+    vi.mocked(api.reverify).mockResolvedValue({...running,status:"verifying"});
+    vi.mocked(api.getProof).mockReturnValue(new Promise(()=>{}));
+    await user.click(screen.getByRole("button",{name:"重新验证"}));
+    await waitFor(()=>expect(api.reverify).toHaveBeenCalled());
+    expect(screen.getByLabelText("Lean 4 代码")).toBeDisabled();
+    expect(screen.getByRole("button",{name:"重新验证"})).toBeDisabled();
+  });
   it("recovers from a transient polling failure", async () => {
     const api = fakeApi();
     vi.mocked(api.getProof).mockRejectedValueOnce(new Error("temporary network failure"));

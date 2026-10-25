@@ -71,7 +71,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
           cache-from: type=gha,scope=leanbridge-amd64
-      - name: Verify real Lean with 512 MiB and one CPU
+      - name: Verify cold-cache Lean with 512 MB and one CPU
+        env:
+          LEANBRIDGE_COLD_CACHE: '1'
         run: node scripts/container-smoke.mjs "$TEST_IMAGE"
       - name: Save container verification evidence
         if: always()

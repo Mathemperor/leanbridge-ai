@@ -46,12 +46,13 @@ function makeApp(options: {
   cloudMode?: boolean;
   readinessVerifier?: LeanVerifier;
   readinessOptions?: VerifyOptions;
+  verifier?: LeanVerifier;
   storeMaxJobs?: number;
 } = {}) {
-  const { storeMaxJobs, ...appOptions } = options;
+  const { storeMaxJobs, verifier, ...appOptions } = options;
   const pipeline = new ProofPipeline({
     model: new Model(),
-    verifier: new Verifier(),
+    verifier: verifier ?? new Verifier(),
     ...(storeMaxJobs === undefined ? {} : { store: new InMemoryJobStore({ maxJobs: storeMaxJobs }) }),
   });
   return createApp({
@@ -73,7 +74,27 @@ describe("LeanBridge HTTP API", () => {
     const cloud = makeApp({backendToken:"test-private-token",cloudMode:true});
     expect((await request(cloud).post("/api/proofs/manual").send({code:"example : True := by trivial"})).status).toBe(401);
     const result=await request(cloud).post("/api/proofs/manual").set("Authorization","Bearer test-private-token").send({code:"example : True := by trivial"});
-    expect(result.status).toBe(200);expect(result.body.status).toBe("verified");expect(result.body.attempts).toHaveLength(1);expect(result.body.translation.notes).toContain("本任务未调用 AI 模型。");
+    expect(result.status).toBe(202);expect(result.body.status).toBe("verifying");expect(result.body.attempts).toHaveLength(1);expect(result.body.translation.notes).toContain("本任务未调用 AI 模型。");
+  });
+  it("accepts a slow manual compiler job before it finishes and exposes the result by polling", async () => {
+    let complete!: (result: VerificationResult) => void;
+    const pending = new Promise<VerificationResult>(resolve => { complete = resolve; });
+    const cloud = makeApp({ verifier: { verify: () => pending } });
+    try {
+      const accepted = await request(cloud).post("/api/proofs/manual")
+        .send({ code: "example : True := by trivial" }).timeout({ response: 500 });
+      expect(accepted.status).toBe(202);
+      const path = `/api/proofs/${accepted.body.id}`;
+      expect((await request(cloud).get(path)).body.status).toBe("verifying");
+      expect((await request(cloud).post(`${path}/verify`).send({ code: "example : False := by trivial" })).status).toBe(409);
+      complete(verified);
+      expect((await request(cloud).get(path)).body).toMatchObject({ status: "verified", verification: { ok: true } });
+    } finally { complete(verified); }
+  });
+
+  it("rejects sorry before creating a manual job", async () => {
+    const response = await request(makeApp()).post("/api/proofs/manual").send({ code: "example : False := by sorry" });
+    expect(response.status).toBe(400);
   });
   let app: ReturnType<typeof makeApp>;
 
@@ -142,9 +163,11 @@ describe("LeanBridge HTTP API", () => {
       .post(`/api/proofs/${id}/verify`)
       .send({ code: "theorem manual : True := by trivial" });
 
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ status: "verified" });
+    expect(response.status).toBe(202);
+    expect(response.body).toMatchObject({ status: "verifying" });
+    expect(response.body.verification).toBeUndefined();
     expect(response.body.attempts.at(-1)).toMatchObject({ kind: "manual" });
+    expect((await request(app).get(`/api/proofs/${id}`)).body.status).toBe("verified");
   });
 
   it("returns 404 for an unknown proof", async () => {

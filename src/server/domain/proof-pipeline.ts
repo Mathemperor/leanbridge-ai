@@ -6,6 +6,10 @@ import { safeProviderErrorDetail } from "./safe-error-detail";
 
 const MANUAL_VERIFICATION_NOTE = "用户手动编辑后重新验证。";
 
+export class ProofJobBusyError extends Error {
+  constructor() { super("当前任务仍在运行，请完成后再修改验证。"); }
+}
+
 export interface ProofPipelineDependencies {
   model: ProofModel;
   verifier: LeanVerifier;
@@ -44,16 +48,15 @@ export class ProofPipeline {
     return this.#store.get(id);
   }
 
-  async verifyCode(rawCode: string): Promise<ProofJob> {
+  startVerifyCode(rawCode: string): ProofJob {
     const code=sanitizeLeanCode(rawCode);
     const job=this.start({mode:"latex",latex:"手动提交的 Lean 源码",autoRepair:false});
     this.#store.recordTranslation(job.id,{normalizedSource:"用户提供的 Lean 源码，未经 AI 翻译。",theoremSummary:"直接编译 Lean 源码；请自行核对命题含义。",assumptions:[],imports:[],leanCode:code,notes:["本任务未调用 AI 模型。"]},"manual");
-    this.#store.transition(job.id,"verifying","正在编译手动提交的 Lean 代码");
-    try {
-      const verification=await this.#verifier.verify(code,this.#verifyDefaults);
-      this.#store.recordVerification(job.id,verification);
-      return this.#store.finish(job.id,verification.ok?"verified":"failed");
-    } catch {return this.#store.fail(job.id,"Lean verification could not be started. Check the Lean project configuration.");}
+    return this.#store.transition(job.id,"verifying","正在编译手动提交的 Lean 代码");
+  }
+
+  async verifyCode(rawCode: string): Promise<ProofJob> {
+    return this.runVerification(this.startVerifyCode(rawCode).id);
   }
 
   async run(id: string): Promise<void> {
@@ -111,8 +114,9 @@ export class ProofPipeline {
     }
   }
 
-  async reverify(id: string, code: string): Promise<ProofJob> {
+  startReverify(id: string, code: string): ProofJob {
     const stored = this.#store.getStored(id);
+    if (stored && stored.status !== "verified" && stored.status !== "failed") throw new ProofJobBusyError();
     if (!stored?.translation) throw new Error("The proof job has no generated Lean source");
     const translation: Translation = {
       ...stored.translation,
@@ -122,11 +126,20 @@ export class ProofPipeline {
         : [...stored.translation.notes.slice(0, 63), MANUAL_VERIFICATION_NOTE],
     };
     this.#store.recordTranslation(id, translation, "manual");
-    this.#store.transition(id, "verifying", "正在验证手动编辑的 Lean 代码");
+    return this.#store.transition(id, "verifying", "正在验证手动编辑的 Lean 代码");
+  }
+
+  async reverify(id: string, code: string): Promise<ProofJob> {
+    return this.runVerification(this.startReverify(id, code).id);
+  }
+
+  async runVerification(id: string): Promise<ProofJob> {
+    const stored = this.#store.getStored(id);
+    if (!stored?.translation) throw new Error("The proof job has no Lean source");
 
     try {
       const verification = await this.#verifier.verify(
-        translation.leanCode,
+        stored.translation.leanCode,
         verifyOptions(stored.request, this.#verifyDefaults),
       );
       this.#store.recordVerification(id, verification);

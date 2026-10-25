@@ -116,6 +116,8 @@ export class InMemoryJobStore {
       translation: structuredClone(translation),
     };
     job.translation = structuredClone(translation);
+    delete job.verification;
+    delete job.error;
     job.attempts.push(attempt);
     if (job.attempts.length > MAX_RETAINED_ATTEMPTS) {
       job.attempts.splice(0, job.attempts.length - MAX_RETAINED_ATTEMPTS);
