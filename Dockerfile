@@ -76,6 +76,7 @@ ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=96 --expose-gc"
 ENV CLOUD_MODE=true
 ENV DEMO_MODE=false
+ENV LEAN_TIMEOUT_MS=240000
 ENV LEAN_PROJECT_PATH=/app/lean-project
 ENV ELAN_HOME=/opt/elan
 ENV PATH="${ELAN_HOME}/bin:${PATH}"

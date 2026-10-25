@@ -141,7 +141,7 @@ export class ProcessLeanVerifier implements LeanVerifier {
     triggerGarbageCollection();
     const started = Date.now();
     const projectPath = resolve(options.projectPath ?? process.cwd());
-    const timeoutMs = options.timeoutMs ?? 30_000;
+    const timeoutMs = options.timeoutMs ?? 60_000;
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "leanbridge-"));
     const sourcePath = join(temporaryDirectory, "Main.lean");
 

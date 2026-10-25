@@ -14,7 +14,7 @@ import { RuntimeMemoryCoordinator, triggerGarbageCollection } from "./domain/run
 import { loadRuntimeEnvironment } from "./secret-env";
 
 const config = loadConfig(loadRuntimeEnvironment(process.env));
-const memoryCoordinator = config.cloudMode ? new RuntimeMemoryCoordinator() : undefined;
+const memoryCoordinator = config.cloudMode ? new RuntimeMemoryCoordinator({ evictAfterEachLean: false }) : undefined;
 const tavilyGrounder = config.tavilyGroundingEnabled
   ? new TavilyMathlibGrounder({ apiKey: config.tavilyApiKey as string })
   : undefined;

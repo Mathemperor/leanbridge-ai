@@ -124,7 +124,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     ...(leanProjectPath ? { leanProjectPath } : {}),
     leanCommand: env.LEAN_COMMAND?.trim() || "lean",
     lakeCommand: env.LAKE_COMMAND?.trim() || "lake",
-    leanTimeoutMs: boundedInteger(env.LEAN_TIMEOUT_MS, cloudMode ? 120_000 : 30_000, 1_000, 300_000),
+    leanTimeoutMs: boundedInteger(env.LEAN_TIMEOUT_MS, cloudMode ? 240_000 : 30_000, 1_000, 600_000),
     maxRepairAttempts: boundedInteger(env.MAX_REPAIR_ATTEMPTS, 3, 0, 5),
   };
 }
