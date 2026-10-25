@@ -1,0 +1,35 @@
+name: Diagnose Lean runtime memory
+
+on:
+  push:
+    branches: [codex/subscription-cloud-20261021]
+    paths:
+      - .github/workflows/diagnose-runtime.yml
+      - .github/scripts/diagnose-runtime.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.repository == 'Mathemperor/leanbridge-ai'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Compare exact Railway limit with original smoke limit
+        run: node .github/scripts/diagnose-runtime.mjs
+      - name: Save resource diagnosis
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lean-runtime-diagnosis-${{ github.run_id }}
+          path: ${{ runner.temp }}/leanbridge-runtime-diagnosis.json
+          if-no-files-found: error
+          retention-days: 14
