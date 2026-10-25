@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 
 // Diagnostic only: immutable public image, no production credentials or model calls.
 const image = 'ghcr.io/mathemperor/leanbridge-ai@sha256:d31d39ee589748d28fac391950d94b063d002e32749cf3e75ef043c307c02b1a';
-const report = { image, startedAt: new Date().toISOString(), timeoutMs: 120000, runs: [] };
+const report = { image, startedAt: new Date().toISOString(), timeoutMs: 120000, coldHostCache: true, runs: [] };
 const docker = (args, options = {}) => String(execFileSync('docker', args, { encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024, ...options }) ?? '').trim();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const cases = [
@@ -22,6 +22,13 @@ function resources(name) {
     try { return [file, docker(['exec', name, 'cat', `/sys/fs/cgroup/${file}`])]; }
     catch { return [file, null]; }
   }));
+}
+
+function dropDisposableRunnerCache() {
+  assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Cache diagnosis only runs on disposable GitHub runners');
+  assert.equal(process.env.RUNNER_OS, 'Linux');
+  execFileSync('sudo', ['sync'], { timeout: 30000, stdio: 'ignore' });
+  execFileSync('sudo', ['tee', '/proc/sys/vm/drop_caches'], { input: '3\n', timeout: 30000, stdio: ['pipe', 'ignore', 'pipe'] });
 }
 
 try {
@@ -49,6 +56,9 @@ try {
       assert(healthy, 'Container health');
       run.before = resources(name);
       for (const [label, code] of cases) {
+        // A freshly pulled image has file pages charged to the host. Evict them
+        // before each case so this container pays for its actual mapped files.
+        dropDisposableRunnerCache();
         const before = resources(name);
         const response = await fetch(`${origin}/api/proofs/manual`, {
           method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
