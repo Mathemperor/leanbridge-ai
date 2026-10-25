@@ -117,7 +117,9 @@ try {
   record('sorry-rejected', { httpStatus: placeholder.status });
   report.oomKilled = docker(['inspect', '--format', '{{.State.OOMKilled}}', name]) === 'true';
   assert.equal(report.oomKilled, false);
+  try { report.memoryCurrentAfterBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.current'])); } catch { report.memoryCurrentAfterBytes = null; }
   try { report.memoryPeakBytes = Number(docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.peak'])); } catch { report.memoryPeakBytes = null; }
+  try { report.memoryEvents = docker(['exec', name, 'cat', '/sys/fs/cgroup/memory.events']); } catch { report.memoryEvents = null; }
   report.success = true;
 } catch (error) {
   report.success = false;

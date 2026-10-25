@@ -1,18 +1,20 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
-const DEFAULT_IDLE_EVICTION_MS = 2 * 60 * 1_000;
+const DEFAULT_IDLE_EVICTION_MS = 30 * 1_000;
 const EVICTION_TIMEOUT_MS = 15_000;
+const NATIVE_EVICT_BINARY = "/usr/local/bin/leanbridge-evict-cache";
 
 export const DEFAULT_CACHE_DIRECTORIES = [
   "/app/lean-project/.lake",
   "/opt/elan",
+  "/app/node_modules",
   "/usr/local/lib/node_modules/@openai/codex",
 ] as const;
 
-// Perl core script (works with Debian's Essential perl-base package) that
-// walks target directories in a single process and invokes Linux SYS_fadvise64
-// (syscall 221 on x86_64) with POSIX_FADV_DONTNEED (4) on .olean/.ilean/binary
-// files so the kernel releases clean page-cache pages from the container cgroup.
+// Perl core fallback script (works with Debian's Essential perl-base package)
+// that walks target directories and invokes Linux SYS_fadvise64 (syscall 221
+// on x86_64) with POSIX_FADV_DONTNEED (4) on all regular files.
 const PERL_FADVISE_DONTNEED_SCRIPT = [
   "sub drop {",
   "  my ($d) = @_;",
@@ -22,7 +24,7 @@ const PERL_FADVISE_DONTNEED_SCRIPT = [
   '    my $p = "$d/$e";',
   "    next if -l $p;",
   "    if (-d _) { drop($p); }",
-  '    elsif (-f _ && ($e =~ /\\.(?:olean|ilean|a|so)$/ || $e eq "lean" || $e eq "codex")) {',
+  "    elsif (-f _) {",
   '      if (open(my $fh, "<", $p)) {',
   "        eval { syscall(221, fileno($fh), 0, 0, 4); };",
   "        close($fh);",
@@ -38,6 +40,7 @@ export type SubprocessKind = "lean" | "codex";
 
 export interface RuntimeMemoryCoordinatorOptions {
   idleEvictionMs?: number;
+  evictAfterEachLean?: boolean;
   evictPageCache?: () => Promise<void>;
   collectGarbage?: () => void;
 }
@@ -70,7 +73,13 @@ export async function evictLinuxPageCache(
       resolve();
     };
 
-    const child = spawn("perl", ["-e", PERL_FADVISE_DONTNEED_SCRIPT, "--", ...directories], {
+    const useNative = existsSync(NATIVE_EVICT_BINARY);
+    const command = useNative ? NATIVE_EVICT_BINARY : "perl";
+    const args = useNative
+      ? [...directories]
+      : ["-e", PERL_FADVISE_DONTNEED_SCRIPT, "--", ...directories];
+
+    const child = spawn(command, args, {
       shell: false,
       windowsHide: true,
       stdio: "ignore",
@@ -93,6 +102,7 @@ export async function evictLinuxPageCache(
 
 export class RuntimeMemoryCoordinator {
   readonly #idleEvictionMs: number;
+  readonly #evictAfterEachLean: boolean;
   readonly #evictPageCache: () => Promise<void>;
   readonly #collectGarbage: () => void;
   #tail: Promise<void> = Promise.resolve();
@@ -102,6 +112,7 @@ export class RuntimeMemoryCoordinator {
 
   constructor(options: RuntimeMemoryCoordinatorOptions = {}) {
     this.#idleEvictionMs = options.idleEvictionMs ?? DEFAULT_IDLE_EVICTION_MS;
+    this.#evictAfterEachLean = options.evictAfterEachLean ?? true;
     this.#evictPageCache = options.evictPageCache ?? (() => evictLinuxPageCache());
     this.#collectGarbage = options.collectGarbage ?? triggerGarbageCollection;
   }
@@ -122,7 +133,12 @@ export class RuntimeMemoryCoordinator {
         return await task();
       } finally {
         if (kind === "lean") {
-          this.#leanCacheWarm = true;
+          if (this.#evictAfterEachLean) {
+            this.#leanCacheWarm = false;
+            await this.#safeEvict();
+          } else {
+            this.#leanCacheWarm = true;
+          }
         }
         this.#collectGarbage();
       }

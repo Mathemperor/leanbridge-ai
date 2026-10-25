@@ -10,7 +10,7 @@ import { OpenAIProofModel } from "./adapters/model/openai-proof-model";
 import { CodexProofModel, CodexSession, runCodexCommand } from "./adapters/model/codex-proof-model";
 import { loadConfig, toPublicConfig } from "./config";
 import { ProofPipeline } from "./domain/proof-pipeline";
-import { RuntimeMemoryCoordinator } from "./domain/runtime-memory";
+import { evictLinuxPageCache, RuntimeMemoryCoordinator, triggerGarbageCollection } from "./domain/runtime-memory";
 import { loadRuntimeEnvironment } from "./secret-env";
 
 const config = loadConfig(loadRuntimeEnvironment(process.env));
@@ -76,5 +76,10 @@ const app = createApp({
 });
 
 app.listen(config.port, () => {
+  if (config.cloudMode) {
+    void evictLinuxPageCache().finally(() => {
+      triggerGarbageCollection();
+    });
+  }
   console.log(`LeanBridge AI is running on http://localhost:${config.port}`);
 });

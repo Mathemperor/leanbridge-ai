@@ -37,10 +37,31 @@ describe("RuntimeMemoryCoordinator", () => {
     expect(order).toEqual(["lean-start", "lean-end", "codex-start", "codex-end"]);
   });
 
-  it("evicts warm Lean page cache before starting Codex but keeps cache warm across consecutive Lean runs", async () => {
+  it("evicts page cache immediately after each Lean run by default", async () => {
     const events: string[] = [];
     const coordinator = new RuntimeMemoryCoordinator({
       idleEvictionMs: 0,
+      evictPageCache: async () => {
+        events.push("evict");
+      },
+      collectGarbage: () => {},
+    });
+
+    await coordinator.runExclusive("lean", async () => {
+      events.push("lean-1");
+    });
+    await coordinator.runExclusive("codex", async () => {
+      events.push("codex-1");
+    });
+
+    expect(events).toEqual(["lean-1", "evict", "codex-1"]);
+  });
+
+  it("evicts warm Lean page cache before starting Codex when evictAfterEachLean is false", async () => {
+    const events: string[] = [];
+    const coordinator = new RuntimeMemoryCoordinator({
+      idleEvictionMs: 0,
+      evictAfterEachLean: false,
       evictPageCache: async () => {
         events.push("evict");
       },
@@ -69,6 +90,7 @@ describe("RuntimeMemoryCoordinator", () => {
       let evictions = 0;
       const coordinator = new RuntimeMemoryCoordinator({
         idleEvictionMs: 1_000,
+        evictAfterEachLean: false,
         evictPageCache: async () => {
           evictions += 1;
         },
