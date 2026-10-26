@@ -1,4 +1,3 @@
-module
 import Mathlib.Tactic.NormNum
 
 theorem leanBridgeImageReady : (1 : Nat) + 1 = 2 := by

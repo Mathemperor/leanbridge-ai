@@ -51,11 +51,6 @@ jobs:
           npm ci
           npm test
           npm run typecheck
-      - name: Make room for Lean and Mathlib
-        run: |
-          df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
-          df -h /
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Build test image
@@ -71,9 +66,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           provenance: false
           cache-from: type=gha,scope=leanbridge-amd64
-      - name: Verify cold-cache Lean with 448 MB and one CPU
-        env:
-          LEANBRIDGE_COLD_CACHE: '1'
+      - name: Verify real LeanWeb compilation with a 192 MB backend
         run: node scripts/container-smoke.mjs "$TEST_IMAGE"
       - name: Save container verification evidence
         if: always()
@@ -118,5 +111,5 @@ jobs:
             echo "Source revision: $SOURCE_REVISION"
             echo "Railway image: $IMAGE_REPOSITORY@$IMAGE_DIGEST"
             echo 'GHCR package must allow anonymous pulls before Railway Free can deploy it.'
-            echo 'Production Codex subscription and Railway Lean acceptance remain separate checks.'
+            echo 'Production Codex subscription and Railway-to-LeanWeb acceptance remain separate checks.'
           } >> "$GITHUB_STEP_SUMMARY"

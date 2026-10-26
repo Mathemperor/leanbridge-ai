@@ -65,7 +65,7 @@ static void evict_root(const char *path) {
 int main(int argc, char **argv) {
   if (argc <= 1) {
     evict_root("/app/lean-project/.lake");
-    evict_root("/opt/elan/toolchains/leanprover--lean4---v4.35.0/lib/lean");
+    evict_root("/opt/elan/toolchains/leanprover--lean4---v4.24.0/lib/lean");
     return 0;
   }
   for (int i = 1; i < argc; i++) {

@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, toPublicConfig } from "./config";
 
 describe("loadConfig", () => {
+  it("uses LeanWeb without a local compiler or paid inference key", () => {
+    const config = loadConfig({ CLOUD_MODE: "true", MODEL_PROVIDER: "codex", LEAN_VERIFIER: "leanweb", LEANBRIDGE_BACKEND_TOKEN: "test" });
+    expect(config.leanTimeoutMs).toBe(120_000);
+    expect(config.apiKey).toBeUndefined();
+    expect(toPublicConfig(config).lean).toMatchObject({ mode: "cloud", verifier: "leanweb", version: "4.24.0", projectConfigured: true });
+    expect(() => loadConfig({ DEMO_MODE: "true", LEAN_VERIFIER: "unknown" })).toThrow(/LEAN_VERIFIER/);
+  });
   it("keeps a distinct browser password private and rejects unsafe reuse", () => {
     const env = { MODEL_PROVIDER: "nebius", NEBIUS_API_KEY: "provider-key-long-value", LEANBRIDGE_BACKEND_TOKEN: "backend-token-long-value", LEANBRIDGE_ACCESS_PASSWORD: "judge-password-long" };
     const config = loadConfig(env);

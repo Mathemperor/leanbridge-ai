@@ -39,7 +39,7 @@ describe("Lean source sanitization", () => {
       .toBe("theorem t : True := by trivial");
   });
 
-  it.each(["sorry", "admit"])("rejects the %s proof placeholder", (placeholder) => {
+  it.each(["sorry", "admit", "sorryAx"])("rejects the %s proof placeholder", (placeholder) => {
     expect(() => sanitizeLeanCode(`theorem t : True := by ${placeholder}`))
       .toThrow(/placeholder/i);
   });

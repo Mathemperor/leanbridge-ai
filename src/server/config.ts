@@ -22,6 +22,7 @@ export interface RuntimeConfig {
   tavilyGroundingEnabled: boolean;
   tavilyApiKey?: string;
   leanProjectPath?: string;
+  leanVerifier: "local" | "leanweb";
   leanCommand: string;
   lakeCommand: string;
   leanTimeoutMs: number;
@@ -40,6 +41,9 @@ export interface PublicRuntimeConfig {
   lean: {
     mode: "demo" | "local" | "cloud";
     projectConfigured: boolean;
+    verifier?: "local" | "leanweb";
+    version?: string;
+    serviceUrl?: string;
   };
 }
 
@@ -81,6 +85,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     throw new Error("LEANBRIDGE_ACCESS_PASSWORD must be 16-256 characters and different from service credentials");
   }
   const leanProjectPath = env.LEAN_PROJECT_PATH?.trim();
+  const leanVerifier = env.LEAN_VERIFIER?.trim() || "local";
+  if (leanVerifier !== "local" && leanVerifier !== "leanweb") throw new Error("LEAN_VERIFIER must be local or leanweb");
   const tavilyRequested = booleanValue(env.TAVILY_GROUNDING_ENABLED);
   const tavilyApiKey = env.TAVILY_API_KEY?.trim();
   const tavilyGroundingEnabled = !demoMode && tavilyRequested;
@@ -97,7 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
   if (cloudMode && !backendToken) {
     throw new Error("LEANBRIDGE_BACKEND_TOKEN is required in cloud mode");
   }
-  if (cloudMode && !leanProjectPath) {
+  if (cloudMode && leanVerifier === "local" && !leanProjectPath) {
     throw new Error("LEAN_PROJECT_PATH is required in cloud mode");
   }
 
@@ -122,9 +128,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     tavilyGroundingEnabled,
     ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),
+    leanVerifier,
     leanCommand: env.LEAN_COMMAND?.trim() || "lean",
     lakeCommand: env.LAKE_COMMAND?.trim() || "lake",
-    leanTimeoutMs: boundedInteger(env.LEAN_TIMEOUT_MS, cloudMode ? 240_000 : 30_000, 1_000, 600_000),
+    leanTimeoutMs: boundedInteger(env.LEAN_TIMEOUT_MS, leanVerifier === "leanweb" ? 120_000 : cloudMode ? 240_000 : 30_000, 1_000, 600_000),
     maxRepairAttempts: boundedInteger(env.MAX_REPAIR_ATTEMPTS, 3, 0, 5),
   };
 }
@@ -141,7 +148,9 @@ export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
     },
     lean: {
       mode: config.cloudMode ? "cloud" : config.demoMode ? "demo" : "local",
-      projectConfigured: Boolean(config.leanProjectPath),
+      projectConfigured: config.leanVerifier === "leanweb" || Boolean(config.leanProjectPath),
+      verifier: config.leanVerifier,
+      ...(config.leanVerifier === "leanweb" ? { version: "4.24.0", serviceUrl: "https://live.lean-lang.org" } : {}),
     },
   };
 }

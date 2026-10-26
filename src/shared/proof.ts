@@ -119,7 +119,7 @@ export function sanitizeLeanCode(value: string): string {
     .replace(/\s*```$/, "")
     .trim();
 
-  if (/\b(?:sorry|admit)\b/.test(code)) {
+  if (/\b(?:sorry|sorryAx|admit)\b/.test(code)) {
     throw new Error("Generated Lean contains a proof placeholder");
   }
   if (/(?:#\s*(?:eval|reduce)\b|\b(?:axiom|by_elab|constant|elab|elab_rules|extern|foreign|include_bytes|include_str|initialize|macro|partial|run_cmd|run_tac|syntax|unsafe)\b|@\[\s*implemented_by\b)/.test(code)) {

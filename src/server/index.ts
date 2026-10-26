@@ -4,6 +4,7 @@ import { TavilyMathlibGrounder } from "./adapters/grounding/tavily-mathlib-groun
 import { DemoLeanVerifier } from "./adapters/lean/demo-verifier";
 import { PinnedLeanReadinessVerifier, ProcessLeanVerifier } from "./adapters/lean/process-verifier";
 import { SerialLeanVerifier } from "./adapters/lean/serial-verifier";
+import { LeanWebVerifier } from "./adapters/lean/leanweb-verifier";
 import { DemoProofModel } from "./adapters/model/demo-proof-model";
 import { NebiusProofModel } from "./adapters/model/nebius-proof-model";
 import { OpenAIProofModel } from "./adapters/model/openai-proof-model";
@@ -14,7 +15,7 @@ import { RuntimeMemoryCoordinator, triggerGarbageCollection } from "./domain/run
 import { loadRuntimeEnvironment } from "./secret-env";
 
 const config = loadConfig(loadRuntimeEnvironment(process.env));
-const memoryCoordinator = config.cloudMode ? new RuntimeMemoryCoordinator({ evictAfterEachLean: false }) : undefined;
+const memoryCoordinator = config.cloudMode && config.leanVerifier === "local" ? new RuntimeMemoryCoordinator({ evictAfterEachLean: false }) : undefined;
 const tavilyGrounder = config.tavilyGroundingEnabled
   ? new TavilyMathlibGrounder({ apiKey: config.tavilyApiKey as string })
   : undefined;
@@ -37,13 +38,13 @@ const model = config.demoMode
         model: config.model,
         reasoningEffort: config.reasoningEffort,
       });
-const baseVerifier = config.demoMode ? new DemoLeanVerifier() : new ProcessLeanVerifier({ cloudMode: config.cloudMode });
-const verifier = config.cloudMode
+const baseVerifier = config.demoMode ? new DemoLeanVerifier() : config.leanVerifier === "leanweb" ? new LeanWebVerifier() : new ProcessLeanVerifier();
+const verifier = config.cloudMode || config.leanVerifier === "leanweb"
   ? new SerialLeanVerifier(baseVerifier, { coordinator: memoryCoordinator })
   : baseVerifier;
 const readinessVerifier = config.demoMode
   ? undefined
-  : config.cloudMode
+  : config.cloudMode && config.leanVerifier === "local"
     ? new PinnedLeanReadinessVerifier(verifier)
     : verifier;
 const verifyDefaults = {
