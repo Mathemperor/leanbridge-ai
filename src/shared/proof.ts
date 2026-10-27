@@ -112,18 +112,64 @@ export interface ProofJob {
   error?: string;
 }
 
-export function sanitizeLeanCode(value: string): string {
+export class LeanSourceValidationError extends Error {
+  constructor(readonly code: "LEAN_PROOF_PLACEHOLDER" | "LEAN_UNSAFE_SOURCE", message: string) {
+    super(message);
+    this.name = "LeanSourceValidationError";
+  }
+}
+
+// Keep literals intact so comment-looking text inside them cannot hide code.
+// Only actual line comments and nested block comments are masked for checking.
+function withoutLeanComments(code: string): string {
+  let checked = "", index = 0, blockDepth = 0;
+  while (index < code.length) {
+    if (blockDepth > 0) {
+      if (code.startsWith("/-", index)) { blockDepth += 1; checked += "  "; index += 2; }
+      else if (code.startsWith("-/", index)) { blockDepth -= 1; checked += "  "; index += 2; }
+      else { checked += code[index] === "\n" ? "\n" : " "; index += 1; }
+      continue;
+    }
+    if (code.startsWith("--", index)) {
+      const end = code.slice(index).search(/[\r\n\u2028\u2029]/);
+      const next = end === -1 ? code.length : index + end;
+      checked += " ".repeat(next - index); index = next; continue;
+    }
+    if (code.startsWith("/-", index)) { blockDepth = 1; checked += "  "; index += 2; continue; }
+    if (code[index] === "«") {
+      const end = code.indexOf("»", index + 1);
+      const next = end === -1 ? code.length : end + 1;
+      checked += code.slice(index, next); index = next; continue;
+    }
+    const character = /^'(?:\\.|[^'\\\r\n])'/u.exec(code.slice(index));
+    if (character) { checked += character[0]; index += character[0].length; continue; }
+    // Lean macros (including dbg_trace) can interpolate nested Lean strings
+    // without a ! prefix. Preserve the whole remaining suffix conservatively;
+    // guessing a string's end could mask an executable token as a comment.
+    if (code[index] === '"') {
+      return checked + code.slice(index);
+    }
+    checked += code[index++];
+  }
+  return checked;
+}
+
+export function normalizeLeanCode(value: string): string {
   const trimmed = value.trim();
-  const code = trimmed
+  return trimmed
     .replace(/^```(?:lean4?|text)?\s*/i, "")
     .replace(/\s*```$/, "")
     .trim();
+}
 
-  if (/\b(?:sorry|sorryAx|admit)\b/.test(code)) {
-    throw new Error("Generated Lean contains a proof placeholder");
+export function sanitizeLeanCode(value: string): string {
+  const code = normalizeLeanCode(value);
+  const checked = withoutLeanComments(code);
+  if (/\b(?:sorry|sorryAx|admit)\b/.test(checked)) {
+    throw new LeanSourceValidationError("LEAN_PROOF_PLACEHOLDER", "Generated Lean contains a proof placeholder");
   }
-  if (/(?:#\s*(?:eval|reduce)\b|\b(?:axiom|by_elab|constant|elab|elab_rules|extern|foreign|include_bytes|include_str|initialize|macro|partial|run_cmd|run_tac|syntax|unsafe)\b|@\[\s*implemented_by\b)/.test(code)) {
-    throw new Error("Generated Lean contains an unsafe Lean construct");
+  if (/(?:#\s*(?:eval|reduce)\b|\b(?:axiom|by_elab|constant|elab|elab_rules|extern|foreign|include_bytes|include_str|initialize|macro|partial|run_cmd|run_tac|syntax|unsafe)\b|@\[\s*implemented_by\b)/.test(checked)) {
+    throw new LeanSourceValidationError("LEAN_UNSAFE_SOURCE", "Generated Lean contains an unsafe Lean construct");
   }
   return code;
 }

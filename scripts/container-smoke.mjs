@@ -104,7 +104,7 @@ try {
   if (memoryAfterReadyBytes !== null) {
     assert(memoryAfterReadyBytes < 160_000_000, `Idle memory after /api/ready should stay below 160 MB, got ${memoryAfterReadyBytes}`);
   }
-  await proof('mathlib-nat-original-regression', 'import Mathlib.Data.Nat.Basic\n\ntheorem ci_nat_add_zero (n : Nat) : n + 0 = n := by\n  rfl\n\n#print axioms ci_nat_add_zero\n');
+  await proof('mathlib-nat-original-regression', 'import Mathlib.Data.Nat.Basic\n\n-- The proof uses no sorry and no new axiom.\n/- A constant /- harmless nested comment -/ is only explanatory text. -/\ntheorem ci_nat_add_zero (n : Nat) : n + 0 = n := by\n  rfl\n\n#print axioms ci_nat_add_zero\n');
   await proof('full-mathlib-real-inequality', 'import Mathlib\n\ntheorem ci_real_inequality (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by\n  nlinarith [sq_nonneg (a-b)]\n\n#print axioms ci_real_inequality\n');
   const invalid = await compile('example : (1 : Nat) = 2 := by rfl');
   assert.equal(invalid.status, 200);

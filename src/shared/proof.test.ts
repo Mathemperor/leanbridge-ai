@@ -34,6 +34,35 @@ describe("proof request validation", () => {
 });
 
 describe("Lean source sanitization", () => {
+  it("accepts proof comments including nested block comments without treating their words as declarations", () => {
+    const code = "-- The derivative is constant; no sorry is used.\n/- A constant function /- no new axiom -/ has zero derivative. -/\nexample : True := by trivial";
+    expect(sanitizeLeanCode(code)).toBe(code);
+  });
+  it("does not interpret quoted interpolation examples inside comments as code", () => {
+    const code='-- s!"sorry" is a comment\n/- dbg_trace "axiom" is also a comment -/\nexample : True := by trivial';
+    expect(sanitizeLeanCode(code)).toBe(code);
+  });
+
+  it("identifies a source rejection without calling it a subscription failure", () => {
+    expect(() => sanitizeLeanCode("example : False := by sorry"))
+      .toThrow(expect.objectContaining({name:"LeanSourceValidationError",code:"LEAN_PROOF_PLACEHOLDER"}));
+  });
+
+  it.each([
+    'def label := "--"; axiom forged : False',
+    'def label := "/-"; axiom forged : False',
+    'def label := r#"-- /-"#; axiom forged : False',
+    'def «--label» := 1; axiom forged : False',
+    'def label := s!"{ "--" }"; axiom forged : False',
+    'def marker : Nat := dbg_trace "{ "/-" }"; 0\nexample : False := by sorry',
+    'def marker : Nat := dbg_trace "{ "/-" }"; 0\n#eval IO.println "scanner-bypass"',
+    "def quote : Char := '\\\"'; def label := \"--\"; axiom forged : False",
+    '-- comment\raxiom forged : False',
+    '/- an outer /- nested -/ comment -/\nexample : False := by sorry',
+  ])("does not hide executable tokens behind a comment-looking literal: %s", (code) => {
+    expect(() => sanitizeLeanCode(code)).toThrow();
+  });
+
   it("removes a single Markdown code fence", () => {
     expect(sanitizeLeanCode("```lean\ntheorem t : True := by trivial\n```"))
       .toBe("theorem t : True := by trivial");

@@ -1,5 +1,5 @@
-import type { ProofJob, ProofRequest, Translation } from "@shared/proof";
-import { sanitizeLeanCode } from "@shared/proof";
+import type { ProofJob, ProofRequest, Translation, VerificationResult } from "@shared/proof";
+import { LeanSourceValidationError, sanitizeLeanCode } from "@shared/proof";
 import type { LeanVerifier, ProofModel, VerifyOptions } from "./ports";
 import { InMemoryJobStore } from "./job-store";
 import { safeProviderErrorDetail } from "./safe-error-detail";
@@ -23,6 +23,15 @@ function verifyOptions(request: ProofRequest, defaults: VerifyOptions): VerifyOp
     ...defaults,
     ...(request.projectPath ? { projectPath: request.projectPath } : {}),
   };
+}
+
+function sourceRejection(code: string): VerificationResult | undefined {
+  try { sanitizeLeanCode(code); return undefined; }
+  catch (error) {
+    if (!(error instanceof LeanSourceValidationError)) throw error;
+    const message = `${error.code}: ${error.message}`;
+    return {ok:false,status:"failed",command:"Lean source validation (not compiled)",durationMs:0,output:message,diagnostics:[{severity:"error",message}]};
+  }
 }
 
 export class ProofPipeline {
@@ -80,9 +89,10 @@ export class ProofPipeline {
 
       for (let repairs = 0; ; repairs += 1) {
         phase = "verifier";
-        this.#store.transition(id, "verifying", repairs === 0 ? "正在调用 Lean 验证" : `正在验证第 ${repairs} 次修复`);
-        const verification = await this.#verifier.verify(
-          translation.leanCode,
+        const rejected = sourceRejection(translation.leanCode);
+        this.#store.transition(id, "verifying", rejected ? "生成源码未通过检查，未发送至编译器" : repairs === 0 ? "正在调用 Lean 验证" : `正在验证第 ${repairs} 次修复`);
+        const verification = rejected ?? await this.#verifier.verify(
+          sanitizeLeanCode(translation.leanCode),
           verifyOptions(request, this.#verifyDefaults),
         );
         this.#store.recordVerification(id, verification);
@@ -138,8 +148,8 @@ export class ProofPipeline {
     if (!stored?.translation) throw new Error("The proof job has no Lean source");
 
     try {
-      const verification = await this.#verifier.verify(
-        stored.translation.leanCode,
+      const verification = sourceRejection(stored.translation.leanCode) ?? await this.#verifier.verify(
+        sanitizeLeanCode(stored.translation.leanCode),
         verifyOptions(stored.request, this.#verifyDefaults),
       );
       this.#store.recordVerification(id, verification);

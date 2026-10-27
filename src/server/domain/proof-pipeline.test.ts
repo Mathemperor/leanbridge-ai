@@ -87,6 +87,39 @@ function harness(results: VerificationResult[], maxRepairAttempts = 3) {
 }
 
 describe("ProofPipeline", () => {
+  it.each([
+    "example : False := by sorry",
+    "axiom forged : False\nexample : False := forged",
+    'def marker : Nat := dbg_trace "{ "/-" }"; 0\nexample : False := by sorry',
+    'def marker : Nat := dbg_trace "{ "/-" }"; 0\n#eval IO.println "scanner-bypass"',
+    'def marker : Nat := dbg_trace "{ "/-" }"; 0\naxiom forged : False',
+  ])("retains rejected model output but never sends it to a compiler: %s", async (code) => {
+    const verifier = new QueueVerifier([verified]);
+    const model: ProofModel = {translate:async()=>({...initial,leanCode:code}),repair:async()=>repaired};
+    const pipeline = new ProofPipeline({model,verifier});
+    const job = pipeline.start({...source,autoRepair:false});
+    await pipeline.run(job.id);
+    expect(verifier.calls).toHaveLength(0);
+    expect(pipeline.get(job.id)).toMatchObject({status:"failed",translation:{leanCode:code},verification:{ok:false,status:"failed",command:"Lean source validation (not compiled)"}});
+    expect(pipeline.get(job.id)?.verification?.output).toMatch(/placeholder|unsafe/);
+  });
+
+  it("repairs a source rejection using the retained model output before compiling", async () => {
+    const verifier = new QueueVerifier([verified]);
+    const contexts: RepairContext[] = [];
+    const code = "example : False := by sorry";
+    const model: ProofModel = {translate:async()=>({...initial,leanCode:code}),repair:async context=>{contexts.push(context);return repaired;}};
+    const pipeline = new ProofPipeline({model,verifier,maxRepairAttempts:1});
+    const job = pipeline.start(source);
+    await pipeline.run(job.id);
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]?.translation.leanCode).toBe(code);
+    expect(contexts[0]?.diagnostics).toMatch(/placeholder/);
+    expect(verifier.calls.map(call=>call.code)).toEqual([repaired.leanCode]);
+    expect(pipeline.get(job.id)).toMatchObject({status:"verified",translation:repaired});
+    expect(pipeline.get(job.id)?.attempts).toHaveLength(2);
+  });
+
   it("verifies supplied Lean without calling the model", async () => {
     const {pipeline,model,verifier}=harness([verified]);
     model.failure=new Error("AI must not run");

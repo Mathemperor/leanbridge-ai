@@ -48,6 +48,14 @@ describe("Codex subscription adapter", () => {
     });
     await expect(model.translate({mode:"latex",latex:"test",autoRepair:false})).resolves.toEqual(translation);
   });
+  it("returns a structured candidate for the pipeline to retain and validate before execution", async () => {
+    const candidate={...translation,leanCode:"example : False := by sorry"};
+    const model=new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"max"},async(_command,args)=>{
+      await writeFile(args[args.indexOf("--output-last-message")+1]!,JSON.stringify(candidate));
+      return {code:0,stdout:"",stderr:"",timedOut:false};
+    });
+    await expect(model.translate({mode:"latex",latex:"test",autoRepair:false})).resolves.toEqual(candidate);
+  });
   it("attaches image bytes to Codex and does not put them in the text prompt", async () => {
     const model = new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high"}, async (_c,args,options) => {
       expect((await readFile(args[args.indexOf("--image")+1]!)).toString()).toBe("test-image");
