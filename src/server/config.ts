@@ -19,6 +19,7 @@ export interface RuntimeConfig {
   model: string;
   baseURL?: string;
   reasoningEffort: ReasoningEffort;
+  codexTimeoutMs: number;
   tavilyGroundingEnabled: boolean;
   tavilyApiKey?: string;
   leanProjectPath?: string;
@@ -125,6 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     model,
     ...(baseURL ? { baseURL } : {}),
     reasoningEffort: reasoningEffort(provider === "codex" ? env.CODEX_REASONING_EFFORT : env.OPENAI_REASONING_EFFORT),
+    codexTimeoutMs: boundedInteger(env.CODEX_GENERATION_TIMEOUT_MS, 900_000, 30_000, 1_800_000),
     tavilyGroundingEnabled,
     ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),

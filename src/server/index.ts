@@ -23,7 +23,7 @@ const model = config.demoMode
   ? new DemoProofModel()
   : config.provider === "codex"
     ? new CodexProofModel(
-        { model: config.model, reasoningEffort: config.reasoningEffort },
+        { model: config.model, reasoningEffort: config.reasoningEffort, timeoutMs: config.codexTimeoutMs },
         runCodexCommand,
         memoryCoordinator,
       )

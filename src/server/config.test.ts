@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, toPublicConfig } from "./config";
 
 describe("loadConfig", () => {
+  it("bounds the Codex generation deadline independently of the Lean deadline", () => {
+    expect(loadConfig({DEMO_MODE:"true"}).codexTimeoutMs).toBe(900000);
+    expect(loadConfig({DEMO_MODE:"true",CODEX_GENERATION_TIMEOUT_MS:"1"}).codexTimeoutMs).toBe(30000);
+    expect(loadConfig({DEMO_MODE:"true",CODEX_GENERATION_TIMEOUT_MS:"99999999"}).codexTimeoutMs).toBe(1800000);
+  });
   it("uses LeanWeb without a local compiler or paid inference key", () => {
     const config = loadConfig({ CLOUD_MODE: "true", MODEL_PROVIDER: "codex", LEAN_VERIFIER: "leanweb", LEANBRIDGE_BACKEND_TOKEN: "test" });
     expect(config.leanTimeoutMs).toBe(120_000);
