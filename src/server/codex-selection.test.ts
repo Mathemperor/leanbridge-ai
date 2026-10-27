@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { createApp } from "./app";
 import { loadConfig, toPublicConfig } from "./config";
 import { ProofPipeline } from "./domain/proof-pipeline";
@@ -8,17 +8,23 @@ import { CodexProofModel } from "./adapters/model/codex-proof-model";
 import type { ProofRequest } from "@shared/proof";
 
 const translation = { normalizedSource: "True", theoremSummary: "True", assumptions: [], imports: [], leanCode: "example : True := by trivial", notes: [] };
+const transcription = {problemText:"Question from photo",problemLatex:"P \\implies P",solutionText:"Solution from photo",solutionLatex:"h \\mapsto h",uncertainties:["Margin cropped"]};
 const verified = { ok: true, status: "verified" as const, command: "test lean", durationMs: 1, output: "", diagnostics: [], exitCode: 0 };
 function fixture() {
   const calls: string[][] = [];
-  const model = new CodexProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, async (_command, args) => {
+  const prompts: string[]=[];
+  const model = new CodexProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, async (_command, args, options) => {
     calls.push(args);
-    await writeFile(args[args.indexOf("--output-last-message") + 1]!, JSON.stringify(translation));
+    prompts.push(options.input!);
+    const schema=JSON.parse(await readFile(args[args.indexOf("--output-schema")+1]!,"utf8"));
+    if(args.includes("--image")) expect(schema.properties).toHaveProperty("problemText");
+    else expect(schema.properties).toHaveProperty("leanCode");
+    await writeFile(args[args.indexOf("--output-last-message") + 1]!, JSON.stringify(args.includes("--image")?transcription:translation));
     return { code: 0, stdout: "", stderr: "", timedOut: false };
   });
   const pipeline = new ProofPipeline({ model, verifier: { verify: async () => verified } });
   const app = createApp({ pipeline, publicConfig: toPublicConfig(loadConfig({ MODEL_PROVIDER: "codex" })) });
-  return { app, pipeline, calls, model };
+  return { app, pipeline, calls, model, prompts };
 }
 
 describe("per-proof Codex subscription selection", () => {
@@ -51,14 +57,14 @@ describe("per-proof Codex subscription selection", () => {
     expect(calls).toHaveLength(0);
   });
   it("isolates queued selections and uses the same settings during image repair after image release", async () => {
-    const { model, calls } = fixture();
+    const { model, calls, prompts } = fixture();
     let verifications = 0;
     const pipeline = new ProofPipeline({ model, verifier: { verify: async () => ++verifications === 1
       ? { ...verified, ok: false, status: "failed", exitCode: 1, output: "type mismatch" } : verified } });
     const image = pipeline.start({ mode: "image", imageDataUrl: "data:image/png;base64,dGVzdA==", autoRepair: true, model: "gpt-6.1-sol", reasoningEffort: "medium" } as ProofRequest);
     await pipeline.run(image.id);
     expect(pipeline.get(image.id)?.status).toBe("verified");
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     for (const args of calls) {
       expect(args[args.indexOf("--model") + 1]).toBe("gpt-6.1-sol");
       expect(args).toContain('model_reasoning_effort="medium"');
@@ -66,12 +72,18 @@ describe("per-proof Codex subscription selection", () => {
     }
     expect(calls[0]).toContain("--image");
     expect(calls[1]).not.toContain("--image");
+    expect(calls[2]).not.toContain("--image");
+    for(const value of [transcription.problemText,transcription.problemLatex,transcription.solutionText,transcription.solutionLatex]) {
+      expect(prompts[1]).toContain(value);
+      expect(prompts[2]).toContain(value);
+    }
+    await expect(stat(calls[0]![calls[0]!.indexOf("--image")+1]!)).rejects.toThrow();
     await Promise.all([
       model.translate({ mode: "latex", latex: "True", autoRepair: false, model: "gpt-6-astra", reasoningEffort: "max" } as ProofRequest),
       model.translate({ mode: "latex", latex: "True", autoRepair: false, model: "gpt-6-luna", reasoningEffort: "low" } as ProofRequest),
     ]);
-    expect(calls[2]).toContain('model_reasoning_effort="max"');
-    expect(calls[3]).toContain('model_reasoning_effort="low"');
+    expect(calls[3]).toContain('model_reasoning_effort="max"');
+    expect(calls[4]).toContain('model_reasoning_effort="low"');
     expect(pipeline.get(image.id)?.modelConfig).toEqual({ model: "gpt-6.1-sol", reasoningEffort: "medium" });
   });
 });

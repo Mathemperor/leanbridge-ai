@@ -22,6 +22,16 @@ const verification: VerificationResult = {
 };
 
 describe("InMemoryJobStore", () => {
+  it("retains bounded trimmed transcription context while overwriting supplied provenance", () => {
+    const store=new InMemoryJobStore();
+    const job=store.create({mode:"latex",latex:"stale",autoRepair:false});
+    const metadata={problemText:"Question",problemLatex:"P",solutionText:"",solutionLatex:"",uncertainties:[],context:"  x is real  ",source:"edited",createdAt:"forged"};
+    store.recordImageTranscription(job.id,metadata,"codex");
+    expect(store.get(job.id)?.imageTranscription).toMatchObject({context:"x is real",source:"codex"});
+    expect(store.get(job.id)?.imageTranscription?.createdAt).not.toBe("forged");
+    expect(()=>store.recordImageTranscription(job.id,{...metadata,context:"x".repeat(10001)},"edited")).toThrow();
+    expect(store.get(job.id)?.imageTranscription?.context).toBe("x is real");
+  });
   it("creates a queued job without echoing the source payload", () => {
     const store = new InMemoryJobStore();
     const job = store.create({

@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { proofRequestSchema, sanitizeLeanCode, translationSchema } from "./proof";
+import { formatImageTranscription, imageTranscriptionSchema, proofRequestSchema, sanitizeLeanCode, translationSchema } from "./proof";
 
 describe("proof request validation", () => {
+  it("retains an edited image transcription when regenerating as text", () => {
+    const imageTranscription={problemText:"题目",problemLatex:"x=x",solutionText:"由自反性",solutionLatex:"x=x",uncertainties:[]};
+    expect(proofRequestSchema.parse({mode:"latex",latex:"识别稿",autoRepair:true,imageTranscription})).toMatchObject({imageTranscription});
+  });
+
+  it("bounds edited transcription fields before accepting a retry", () => {
+    const imageTranscription={problemText:"x".repeat(8001),problemLatex:"",solutionText:"",solutionLatex:"",uncertainties:[]};
+    expect(proofRequestSchema.safeParse({mode:"latex",latex:"识别稿",imageTranscription}).success).toBe(false);
+  });
+  it("retains and bounds user context for an edited transcription reopened from history", () => {
+    const imageTranscription={problemText:"题目",problemLatex:"",solutionText:"",solutionLatex:"",uncertainties:[],context:"所有变量均为实数"};
+    expect(proofRequestSchema.parse({mode:"latex",latex:"识别稿",imageTranscription})).toMatchObject({imageTranscription});
+    expect(proofRequestSchema.safeParse({mode:"latex",latex:"识别稿",imageTranscription:{...imageTranscription,context:"x".repeat(10001)}}).success).toBe(false);
+  });
+
   it("requires source for the selected mode", () => {
     const result = proofRequestSchema.safeParse({
       mode: "latex",
@@ -30,6 +45,32 @@ describe("proof request validation", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("image transcription contract", () => {
+  const transcript={problemText:"题目",problemLatex:"\\forall x, x=x",solutionText:"解答",solutionLatex:"x=x",uncertainties:["一个字符不清晰"]};
+  it("keeps problem, solution and LaTeX distinct in the formalization source", () => {
+    const text=formatImageTranscription(transcript,"用户说明");
+    for (const value of Object.values(transcript).flat()) expect(text).toContain(value);
+    expect(text).toContain("用户说明");
+    expect(text).toContain("题目（LaTeX）");
+    expect(text).toContain("解答（LaTeX）");
+  });
+  it("accepts a missing solution and an unreadable problem for retention", () => {
+    expect(imageTranscriptionSchema.safeParse({problemText:"",problemLatex:"",solutionText:"",solutionLatex:"",uncertainties:["无法辨识题目"]}).success).toBe(true);
+  });
+  it("fits all permitted transcription data and image context within the text request limit", () => {
+    const value={problemText:"p".repeat(8000),problemLatex:"q".repeat(8000),solutionText:"s".repeat(8000),solutionLatex:"t".repeat(8000),uncertainties:Array(20).fill("u".repeat(200))};
+    expect(imageTranscriptionSchema.safeParse(value).success).toBe(true);
+    expect(formatImageTranscription(value,"c".repeat(10000)).length).toBeLessThan(50000);
+    expect(imageTranscriptionSchema.safeParse({...value,uncertainties:["u".repeat(201)]}).success).toBe(false);
+    expect(imageTranscriptionSchema.safeParse({...value,uncertainties:Array(21).fill("u")}).success).toBe(false);
+  });
+  it("does not trust client-supplied transcription provenance", () => {
+    const parsed=proofRequestSchema.parse({mode:"latex",latex:"识别稿",imageTranscription:{...transcript,source:"codex",createdAt:"forged"}});
+    expect(parsed).toMatchObject({imageTranscription:transcript});
+    expect(JSON.stringify(parsed)).not.toMatch(/forged|"source"/);
   });
 });
 

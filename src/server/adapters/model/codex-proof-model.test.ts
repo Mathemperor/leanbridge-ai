@@ -4,6 +4,7 @@ import { CodexProofModel, codexEnvironment, parseDeviceLogin, runCodexCommand } 
 import { loadConfig } from "../../config";
 
 const translation = { normalizedSource: "n + 0 = n", theoremSummary: "加零", assumptions: [], imports: [], leanCode: "example (n : Nat) : n + 0 = n := by rfl", notes: [] };
+const transcription = {problemText:"Prove addition",problemLatex:"n+0=n",solutionText:"By reflexivity",solutionLatex:"rfl",uncertainties:["Bottom line cropped"]};
 describe("Codex subscription adapter", () => {
   it("ends the entire launcher process tree at the deadline", async () => {
     const started=Date.now();
@@ -60,10 +61,60 @@ describe("Codex subscription adapter", () => {
     const model = new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high"}, async (_c,args,options) => {
       expect((await readFile(args[args.indexOf("--image")+1]!)).toString()).toBe("test-image");
       expect(options.input).not.toContain("dGVzdC1pbWFnZQ==");
-      await writeFile(args[args.indexOf("--output-last-message")+1]!,JSON.stringify(translation));
+      expect(options.timeoutMs).toBe(180000);
+      expect(options.input).toContain("Never solve");
+      expect(options.input).not.toContain("formalization engineer");
+      const schema=JSON.parse(await readFile(args[args.indexOf("--output-schema")+1]!,"utf8"));
+      expect(schema.required).toEqual(["problemText","problemLatex","solutionText","solutionLatex","uncertainties"]);
+      expect(schema.properties.problemText.maxLength).toBe(8000);
+      expect(schema.properties.uncertainties.maxItems).toBe(20);
+      await writeFile(args[args.indexOf("--output-last-message")+1]!,JSON.stringify(transcription));
       return {code:0,stdout:"",stderr:"",timedOut:false};
     });
-    await model.translate({mode:"image",imageDataUrl:"data:image/png;base64,dGVzdC1pbWFnZQ==",autoRepair:false});
+    expect(await model.transcribeImage({mode:"image",imageDataUrl:"data:image/png;base64,dGVzdC1pbWFnZQ==",autoRepair:false})).toEqual(transcription);
+  });
+  it("explicitly rejects direct image formalization without running a command", async () => {
+    let calls=0;
+    const model=new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high"},async()=>{calls++;throw new Error("must not run");});
+    await expect(model.translate({mode:"image",imageDataUrl:"data:image/png;base64,dGVzdA==",autoRepair:false})).rejects.toThrow(/transcrib/i);
+    expect(calls).toBe(0);
+  });
+  it.each([
+    'private-image-content is not JSON',
+    JSON.stringify({...transcription,problemText:"x".repeat(8001)}),
+    JSON.stringify(translation),
+  ])("rejects invalid recognition output categorically and removes temporary image files",async output=>{
+    let directory="";
+    const model=new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high"},async(_command,args,options)=>{
+      directory=options.cwd!;
+      await writeFile(args[args.indexOf("--output-last-message")+1]!,output);
+      return {code:0,stdout:"",stderr:"",timedOut:false};
+    });
+    await expect(model.transcribeImage({mode:"image",imageDataUrl:"data:image/png;base64,dGVzdA==",autoRepair:false})).rejects.toMatchObject({code:"CODEX_TRANSCRIPTION_INVALID",message:expect.not.stringContaining("private")});
+    await expect(stat(directory)).rejects.toThrow();
+  });
+  it("keeps recognition and text jobs serialized with separate deadlines and cleans up recognition errors", async () => {
+    let active=0, maximum=0; const paths:string[]=[];
+    const model=new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high",timeoutMs:900000,transcriptionTimeoutMs:30000},async(_command,args,options)=>{
+      maximum=Math.max(maximum,++active);
+      paths.push(options.cwd!);
+      await new Promise(resolve=>setTimeout(resolve,10));
+      if(args.includes("--image")){
+        expect(options.timeoutMs).toBe(30000); active--;
+        return {code:1,stdout:"",stderr:"private-recognition-payload",timedOut:true};
+      }
+      expect(options.timeoutMs).toBe(900000);
+      await writeFile(args[args.indexOf("--output-last-message")+1]!,JSON.stringify(translation)); active--;
+      return {code:0,stdout:"",stderr:"",timedOut:false};
+    });
+    const results=await Promise.allSettled([
+      model.transcribeImage({mode:"image",imageDataUrl:"data:image/png;base64,dGVzdA==",autoRepair:false}),
+      model.translate({mode:"latex",latex:"n+0=n",autoRepair:false}),
+    ]);
+    expect(results[0]).toMatchObject({status:"rejected",reason:{code:"CODEX_TIMEOUT"}});
+    expect(results[1]).toMatchObject({status:"fulfilled",value:translation});
+    expect(maximum).toBe(1);
+    for(const path of paths) await expect(stat(path)).rejects.toThrow();
   });
   it("returns a safe quota error instead of exposing process stderr", async () => {
     const model = new CodexProofModel({model:"gpt-6-astra",reasoningEffort:"high"}, async () => ({code:1,stdout:"",stderr:"usage_limit_reached bearer private-token",timedOut:false}));

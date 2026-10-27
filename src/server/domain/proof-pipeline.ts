@@ -1,5 +1,5 @@
 import type { ProofJob, ProofRequest, Translation, VerificationResult } from "@shared/proof";
-import { LeanSourceValidationError, sanitizeLeanCode } from "@shared/proof";
+import { formatImageTranscription, LeanSourceValidationError, sanitizeLeanCode } from "@shared/proof";
 import type { LeanVerifier, ProofModel, VerifyOptions } from "./ports";
 import { InMemoryJobStore } from "./job-store";
 import { safeProviderErrorDetail } from "./safe-error-detail";
@@ -72,19 +72,39 @@ export class ProofPipeline {
     const stored = this.#store.getStored(id);
     if (!stored) throw new Error(`Unknown proof job: ${id}`);
     const { request } = stored;
-    let phase: "model" | "verifier" = "model";
+    let phase: "recognition" | "model" | "verifier" = "model";
+    let formalizationSource: ProofRequest = request;
 
     try {
       if (request.mode === "image") {
-        this.#store.transition(id, "reading", "正在识别手写证明");
+        phase = "recognition";
+        this.#store.transition(id, "reading", "正在识别题目与已有解答");
+        try {
+          if (!this.#model.transcribeImage) throw new Error("Image recognition is unavailable");
+          const transcription = await this.#model.transcribeImage(request);
+          this.#store.recordImageTranscription(id, {...transcription,...(request.context!==undefined?{context:request.context}:{})}, "codex");
+          if (!transcription.problemText.trim() && !transcription.problemLatex.trim()) {
+            this.#store.fail(id, "Image recognition failed: no readable problem was found. Edit the retained transcription and retry.");
+            return;
+          }
+          const {imageDataUrl: _image, context, mode: _mode, ...options} = request;
+          formalizationSource = {mode:"latex",latex:formatImageTranscription(transcription,context),...options};
+        } finally {
+          this.#store.releaseLargeInput(id);
+        }
+      } else if (request.imageTranscription) {
+        if (!request.imageTranscription.problemText.trim() && !request.imageTranscription.problemLatex.trim()) {
+          this.#store.fail(id, "Image recognition failed: no readable problem was found. Edit the retained transcription and retry.");
+          return;
+        }
+        formalizationSource = {
+          ...request,
+          latex: formatImageTranscription(request.imageTranscription, request.imageTranscription.context),
+        };
       }
+      phase = "model";
       this.#store.transition(id, "translating", "正在构造 Lean 4 形式化证明");
-      let translation: Translation;
-      try {
-        translation = await this.#model.translate(request);
-      } finally {
-        this.#store.releaseLargeInput(id);
-      }
+      let translation: Translation = await this.#model.translate(formalizationSource);
       this.#store.recordTranslation(id, translation, "initial");
 
       for (let repairs = 0; ; repairs += 1) {
@@ -109,17 +129,19 @@ export class ProofPipeline {
         phase = "model";
         this.#store.transition(id, "repairing", `正在根据编译诊断进行第 ${repairs + 1} 次修复`);
         translation = await this.#model.repair({
-          source: request,
+          source: formalizationSource,
           translation,
           diagnostics: verification.output,
         });
         this.#store.recordTranslation(id, translation, "repair");
       }
     } catch (error) {
-      const message = phase === "model"
+      const message = phase === "recognition"
+        ? "Image recognition failed. Check the image and Codex connection, then retry."
+        : phase === "model"
         ? "AI translation failed. Check the server configuration and try again."
         : "Lean verification could not be started. Check the Lean project configuration.";
-      const detail = phase === "model" ? safeProviderErrorDetail(error) : "";
+      const detail = phase !== "verifier" ? safeProviderErrorDetail(error) : "";
       this.#store.fail(id, detail ? `${message} ${detail}` : message);
     }
   }

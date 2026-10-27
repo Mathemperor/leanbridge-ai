@@ -5,9 +5,12 @@ import type {
   ProofJob,
   ProofJobStatus,
   ProofRequest,
+  EditedImageTranscription,
+  StoredImageTranscription,
   Translation,
   VerificationResult,
 } from "@shared/proof";
+import { editedImageTranscriptionSchema } from "@shared/proof";
 import { triggerGarbageCollection } from "./runtime-memory";
 
 const MAX_RETAINED_ATTEMPTS = 4;
@@ -81,6 +84,9 @@ export class InMemoryJobStore {
       attempts: [],
     };
     this.#jobs.set(job.id, job);
+    if (request.mode === "latex" && request.imageTranscription) {
+      this.recordImageTranscription(job.id, request.imageTranscription, "edited");
+    }
     return publicSnapshot(job);
   }
 
@@ -102,6 +108,19 @@ export class InMemoryJobStore {
       job.updatedAt = now();
       triggerGarbageCollection();
     }
+  }
+
+  recordImageTranscription(id: string, value: EditedImageTranscription, source: StoredImageTranscription["source"]): ProofJob {
+    const job = this.#require(id);
+    const at = now();
+    job.imageTranscription = {
+      ...editedImageTranscriptionSchema.parse(value),
+      source,
+      createdAt: at,
+      ...(job.modelConfig ? {modelConfig: {...job.modelConfig}} : {}),
+    };
+    job.updatedAt = at;
+    return publicSnapshot(job);
   }
 
   transition(id: string, status: ProofJobStatus, label: string, detail?: string): ProofJob {

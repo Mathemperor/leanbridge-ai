@@ -1,4 +1,4 @@
-import type { ProofRequest, Translation, VerificationResult } from "@shared/proof";
+import type { ImageTranscription, ProofRequest, Translation, VerificationResult } from "@shared/proof";
 
 export interface VerifyOptions {
   projectPath?: string;
@@ -18,6 +18,7 @@ export interface RepairContext {
 }
 
 export interface ProofModel {
+  transcribeImage?(source: Extract<ProofRequest, {mode:"image"}>): Promise<ImageTranscription>;
   translate(source: ProofRequest): Promise<Translation>;
   repair(context: RepairContext): Promise<Translation>;
 }

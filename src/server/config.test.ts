@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, toPublicConfig } from "./config";
 
 describe("loadConfig", () => {
+  it("bounds recognition independently and advertises the Codex two-stage flow", () => {
+    const config = loadConfig({MODEL_PROVIDER:"codex"});
+    expect(config.codexTranscriptionTimeoutMs).toBe(180000);
+    expect(loadConfig({MODEL_PROVIDER:"codex",CODEX_TRANSCRIPTION_TIMEOUT_MS:"1"}).codexTranscriptionTimeoutMs).toBe(30000);
+    expect(loadConfig({MODEL_PROVIDER:"codex",CODEX_TRANSCRIPTION_TIMEOUT_MS:"999999"}).codexTranscriptionTimeoutMs).toBe(300000);
+    expect(loadConfig({MODEL_PROVIDER:"codex",CODEX_TRANSCRIPTION_TIMEOUT_MS:"invalid"}).codexTranscriptionTimeoutMs).toBe(180000);
+    expect(toPublicConfig(config).imagePipeline).toBe("transcribe_then_formalize");
+    expect(toPublicConfig(loadConfig({DEMO_MODE:"true"})).imagePipeline).toBeUndefined();
+  });
   it("bounds the Codex generation deadline independently of the Lean deadline", () => {
     expect(loadConfig({DEMO_MODE:"true"}).codexTimeoutMs).toBe(900000);
     expect(loadConfig({DEMO_MODE:"true",CODEX_GENERATION_TIMEOUT_MS:"1"}).codexTimeoutMs).toBe(30000);

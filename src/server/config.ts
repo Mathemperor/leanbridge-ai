@@ -20,6 +20,7 @@ export interface RuntimeConfig {
   baseURL?: string;
   reasoningEffort: ReasoningEffort;
   codexTimeoutMs: number;
+  codexTranscriptionTimeoutMs: number;
   tavilyGroundingEnabled: boolean;
   tavilyApiKey?: string;
   leanProjectPath?: string;
@@ -31,6 +32,7 @@ export interface RuntimeConfig {
 }
 
 export interface PublicRuntimeConfig {
+  imagePipeline?: "transcribe_then_formalize";
   codexCatalog?: CodexCatalog;
   provider: "demo" | ModelProvider;
   model: string;
@@ -127,6 +129,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     ...(baseURL ? { baseURL } : {}),
     reasoningEffort: reasoningEffort(provider === "codex" ? env.CODEX_REASONING_EFFORT : env.OPENAI_REASONING_EFFORT),
     codexTimeoutMs: boundedInteger(env.CODEX_GENERATION_TIMEOUT_MS, 900_000, 30_000, 1_800_000),
+    codexTranscriptionTimeoutMs: boundedInteger(env.CODEX_TRANSCRIPTION_TIMEOUT_MS, 180_000, 30_000, 300_000),
     tavilyGroundingEnabled,
     ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),
@@ -140,7 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
 
 export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
   return {
-    ...(config.provider === "codex" && !config.demoMode ? { codexCatalog: codexCatalog(config) } : {}),
+    ...(config.provider === "codex" && !config.demoMode ? { codexCatalog: codexCatalog(config), imagePipeline: "transcribe_then_formalize" as const } : {}),
     provider: config.demoMode ? "demo" : config.provider,
     model: config.model,
     reasoningEffort: config.reasoningEffort,

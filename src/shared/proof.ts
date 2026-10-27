@@ -19,6 +19,37 @@ export const imageDataUrlSchema = z
   .regex(imageDataUrlPattern, "仅支持 PNG、JPEG 或 WebP 图片")
   .refine((value) => decodedBase64Bytes(value) <= MAX_IMAGE_BYTES, "图片不能超过 10 MiB");
 
+export const imageTranscriptionSchema = z.object({
+  problemText: z.string().max(8_000),
+  problemLatex: z.string().max(8_000),
+  solutionText: z.string().max(8_000),
+  solutionLatex: z.string().max(8_000),
+  uncertainties: z.array(z.string().max(200)).max(20),
+});
+
+export type ImageTranscription = z.infer<typeof imageTranscriptionSchema>;
+export const editedImageTranscriptionSchema = imageTranscriptionSchema.extend({
+  context: z.string().trim().max(10_000).optional(),
+});
+export type EditedImageTranscription = z.infer<typeof editedImageTranscriptionSchema>;
+export interface StoredImageTranscription extends EditedImageTranscription {
+  source: "codex" | "edited";
+  createdAt: string;
+  modelConfig?: CodexSettings;
+}
+
+export function formatImageTranscription(value: ImageTranscription, context?: string): string {
+  const sections = [
+    ["题目（文字）", value.problemText],
+    ["题目（LaTeX）", value.problemLatex],
+    ["解答（文字）", value.solutionText],
+    ["解答（LaTeX）", value.solutionLatex],
+  ].map(([title, text]) => `## ${title}\n${text!.trim() || "（原图未提供或未识别）"}`);
+  if (value.uncertainties.length) sections.push(`## 识别疑点（不得自行补造）\n${value.uncertainties.map(item => `- ${item}`).join("\n")}`);
+  if (context?.trim()) sections.push(`## 用户补充说明\n${context.trim()}`);
+  return sections.join("\n\n");
+}
+
 const commonRequestFields = {
   model: z.string().trim().min(1).max(100).optional(),
   reasoningEffort: z.enum(CODEX_REASONING_EFFORTS).optional(),
@@ -30,6 +61,7 @@ export const proofRequestSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("latex"),
     latex: z.string().trim().min(1, "请输入 LaTeX 或文字证明").max(50_000),
+    imageTranscription: editedImageTranscriptionSchema.optional(),
     ...commonRequestFields,
   }),
   z.object({
@@ -99,6 +131,7 @@ export interface ProofAttempt {
 }
 
 export interface ProofJob {
+  imageTranscription?: StoredImageTranscription;
   modelConfig?: CodexSettings;
   id: string;
   mode: ProofMode;
