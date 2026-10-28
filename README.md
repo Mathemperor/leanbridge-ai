@@ -2,6 +2,36 @@
 
 **AI proposes the proof. Lean decides whether it is valid.**
 
+## Current cloud release: ChatGPT subscription + LeanWeb
+
+The `codex/subscription-cloud-20261021` release runs official ChatGPT-plan OAuth inference over HTTPS and compiles proofs with the official LeanWeb `mathlib-v4.24.0` service. The Railway image contains neither Codex CLI nor a local Lean toolchain. GitHub Actions builds and tests the image before Railway pulls its immutable digest.
+
+The mobile workbench keeps owner-only proof records, model/reasoning selections, editable image recognition and history deletion. Images are first transcribed into separate question/solution text and LaTeX fields; generation and compiler-guided repairs then receive text only. Actual Lean diagnostics determine the result. Complex proofs can require a corrected import or an edited retry; the UI preserves recognition and failed drafts.
+
+### Subscription authorization
+
+Use `MODEL_PROVIDER=codex`, `DEMO_MODE=false`, `CLOUD_MODE=true` and `LEAN_VERIFIER=leanweb`. Set the protected backend bearer in `LEANBRIDGE_BACKEND_TOKEN` and the matching Site configuration. Keep credentials in hosting secret settings.
+
+The server uses `CHATGPT_PLAN_AUTH_DIR=/data/chatgpt-plan` on the existing private volume and `CHATGPT_PLAN_BACKEND_ORIGIN` for its public HTTPS origin. `CHATGPT_PLAN_CLIENT_ID` can contain the previously issued public OAuth client ID; an initial connection can register through the official dynamic-client flow. The granted client ID is retained with the encrypted session.
+
+For the current hosted workbench, run this one-time desktop helper:
+
+```sh
+node scripts/authorize-chatgpt-plan.mjs
+```
+
+It listens on `http://127.0.0.1:1455` for 20 minutes. Sign in to the workbench as its owner, choose **Connect subscription**, and follow the browser flow to `auth.openai.com`. The helper validates the setup with the pinned HTTPS backend and forwards the one-time code; durable tokens are exchanged and saved on the server. Close the helper after connection. Daily mobile use does not require the desktop process.
+
+Session files have private permissions, authenticated encryption and atomic writes. One replica owns rotating refreshes, respects the provider's earliest-refresh time, preserves credentials on temporary failures, and permits reconnect after terminal refresh errors. The local encryption key and ciphertext share the private volume; volume protection remains the security boundary. The old `/data/codex` directory is preserved for rollback and is not read by this runtime.
+
+This workbench uses the granted ChatGPT plan allowance, without an inference API key or automatic billing-provider fallback. Keep `OPENAI_API_KEY` empty for this subscription deployment. The public provider name remains `codex` for compatibility; `subscriptionTransport: chatgpt-plan` identifies the new transport.
+
+See the [production design](docs/superpowers/specs/2026-10-28-chatgpt-plan-design.md) and [implementation ledger](docs/superpowers/plans/2026-10-28-chatgpt-plan-progress.md). Official protocol references: [sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
+
+## Historical development profiles
+
+The sections below retain the earlier hackathon and API-provider development profiles. The deployed subscription workbench uses the cloud release described above.
+
 LeanBridge AI is a proof-formalization workbench for turning informal mathematics into executable Lean 4 proofs. On the 2026 hackathon branch, **NVIDIA Nemotron runs through Nebius Token Factory** to generate Lean code and to repair failed proofs using exact compiler diagnostics from a real Lean/mathlib environment. An optional Tavily grounding step can search bounded Lean/mathlib references before the initial Nemotron call.
 
 This branch is being prepared for the **Nebius × NVIDIA Global AI Hackathon — Best Apps and Agents Track**. The [current rules](https://nebiusglobalaihackathon.devpost.com/rules) describe Token Factory Sandboxes for the coding track; LeanBridge currently runs its verifier in its own Docker environment, so the apps-and-agents track matches the implemented architecture.

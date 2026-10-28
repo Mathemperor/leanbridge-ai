@@ -1,5 +1,23 @@
 # SDD ledger — plan: docs/superpowers/plans/2026-10-28-chatgpt-plan.md
 
+## Final status — complete, 2026-10-28
+
+Tasks 1–4 are implemented, reviewed, published and accepted on the existing production branch. The entries below this section preserve earlier checkpoints; their pending labels are superseded by this final status.
+
+- Backend runtime revision: `5336ffa016f9664e98b06421e7e2c1847d04b2de`. Exact production image: `ghcr.io/mathemperor/leanbridge-ai@sha256:6486ec6530cc242ed5734a0b4dde017a3d78448c45bad73209662b6944220d0f`. Actual image assertions confirm neither Codex CLI nor a local Lean compiler is installed. GitHub Actions run `40645541974` succeeded.
+- Final backend verification: 285 tests, typecheck and build passed, including 43 session tests. Final frontend verification: 93 unit tests, 2 rendered HTML tests, typecheck and build passed. No runtime changes followed these checks; final follow-up is documentation only.
+- Site revision 15 is published from frontend `99e509d8d57994977994a55b24d01356d35b4d36`. Owner-only APIs, model/effort selection, editable image text/LaTeX, history and deletion remain available. Mobile 304 px layout has no horizontal overflow.
+- Actual official HTTPS consent and loopback form succeeded. The desktop helper was stopped; production retained its grant across restart. Request-driven upstream refresh extended the observed access expiry from `2026-10-28T09:14:33.822Z` to `2026-10-28T10:13:08.240Z`, without user login. A second restart retained the rotated grant and same new expiry. A subsequent actual Astra High request generated a natural-number proof and LeanWeb accepted it in 4,492 ms.
+- Production real LeanWeb accepted correct Mathlib proofs and rejected a false proof; the production entry rejected `sorry` with HTTP 400. Actual Astra Max text generation also compiled successfully. No API-key billing fallback was used.
+- The original uploaded analysis problem was transcribed into editable question/solution text and LaTeX. Astra Max OCR hit the 180-second timeout; Astra High OCR succeeded. Initial formalization and three repairs missed `Mathlib.Analysis.Calculus.Deriv.MeanValue`. An explicitly marked import hint plus that model's own prior draft was added to the editable solution; the next actual subscription generation passed production LeanWeb in 5,361 ms, with only `propext`, `Classical.choice`, `Quot.sound` and no `sorryAx`. This is an assisted retry, not an unassisted first-pass claim. The statement and half-line/right-derivative assumptions were preserved. Independent hand-written code was not substituted for model output.
+- The accepted original proof was restored from owner-only durable history after the second restart. User history was not deleted during acceptance.
+- Production memory: 30-second samples during recognition, generation, repair, compilation and refresh observed a maximum of 55,439,360 bytes; this is a sampled maximum. CI's actual container cgroup peak was 44,019,712 bytes under its 192 MB compilation-test budget, with no OOM.
+- Railway remains on the exact accepted image, one sfo replica and the existing private 500 MB `/data` volume, with no staged changes. OAuth storage and model billing scope were not expanded during acceptance.
+
+Disposition: retain the already published `codex/subscription-cloud-20261021` branch and existing dedicated clone, as authorized for this delivery; do not merge or remove them. The final ledger is committed here before removing this plan's ignored scratch workspace. Private screenshots, proof exports, original image and credentials are not included in this public ledger. Full private evidence and the mobile handoff are kept in the task's `outputs/LeanBridge` directory.
+
+## Earlier checkpoints
+
 Base: f53cf73583dad4fce2065d1af0a7ee02f5ff50ce, dedicated existing task clone/branch, clean before starting.
 Design direction is explicitly authorized by latest user instruction; do not ask them to choose the route again. Durable storage and official bootstrap protocol are builder choices, documented in the spec.
 Task 1: implemented, 35 focused session tests passed; pending review/live cloud acceptance.
