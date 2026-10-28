@@ -5,7 +5,7 @@ import { createRemoteJWKSet, customFetch, jwtVerify, type JWTVerifyGetKey } from
 
 const ISSUER = 'https://auth.openai.com';
 const RESOURCE = 'https://api.openai.com/v1';
-const REDIRECT = 'http://127.0.0.1:59255/auth/callback';
+const REDIRECT = 'http://127.0.0.1:1455/auth/callback';
 const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const REQUIRED_SCOPES = ['openid', 'offline_access', 'resource.invoke', 'chatgpt.tokens.use.direct'];
 const MAX_BODY = 1_048_576;

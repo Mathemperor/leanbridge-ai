@@ -48,7 +48,7 @@ async function fixture(existingClient: string | undefined = clientId) {
       if (['invalid_refresh_token', 'token_expired', 'refresh_token_expired', 'refresh_token_invalidated', 'refresh_token_reused'].includes(mode)) return Response.json({ error: mode }, { status: 400 });
       if (mode === 'malformed') return new Response('SECRET_UPSTREAM_BODY', { status: 200 });
     } else {
-      expect(body.get('redirect_uri')).toBe('http://127.0.0.1:59255/auth/callback');
+      expect(body.get('redirect_uri')).toBe('http://127.0.0.1:1455/auth/callback');
       expect(createHash('sha256').update(body.get('code_verifier')!).digest('base64url')).toBe(auth.searchParams.get('code_challenge'));
       await onExchange?.();
     }
@@ -97,7 +97,7 @@ describe('ChatGPTPlanSession', () => {
     for (const field of ['state', 'nonce', 'code_challenge']) expect(a.searchParams.get(field)).not.toBe(b.searchParams.get(field));
     expect(first.ticket).not.toBe(second.setup!.ticket);
     expect(first.completeUrl).toBe('https://leanbridge.example/api/subscription/callback');
-    expect(a.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:59255/auth/callback');
+    expect(a.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:1455/auth/callback');
     expect(a.searchParams.has('code_verifier')).toBe(false);
   });
   it('serializes refresh and atomically persists rotating tokens for restart and the next refresh', async () => {

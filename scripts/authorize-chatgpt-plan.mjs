@@ -16,7 +16,7 @@ async function jsonResponse(response){
  try{while(true){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.byteLength;if(bytes>24000)throw new Error('SIZE');text+=decoder.decode(chunk.value,{stream:true});}text+=decoder.decode();return JSON.parse(text);}
  finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
 }
-export async function startChatGPTBridge({port=59255,backendOrigin=BACKEND,siteOrigin=SITE,fetchImpl=fetch}={}){
+export async function startChatGPTBridge({port=1455,backendOrigin=BACKEND,siteOrigin=SITE,fetchImpl=fetch}={}){
  if(new URL(backendOrigin).protocol!=='https:' || new URL(backendOrigin).origin!==backendOrigin)throw new Error('Invalid backend origin');
  let origin,pending,busy=false;
  const status={state:'idle',connected:false};
@@ -87,5 +87,5 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   console.log('请在同一电脑打开工作台并连接订阅。长期授权直接保存在云端；20 分钟后此桥接自动关闭。');
   const close=async()=>{await bridge.close();process.exit(0);};
   process.once('SIGINT',close);setTimeout(close,20*60000).unref();
- }catch{console.error('无法启动授权桥接。请检查本机 59255 端口是否已被旧探针占用。');process.exitCode=1;}
+ }catch{console.error('无法启动授权桥接。请检查本机 1455 端口是否已被旧探针占用。');process.exitCode=1;}
 }
