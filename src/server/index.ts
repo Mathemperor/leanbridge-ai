@@ -8,13 +8,18 @@ import { LeanWebVerifier } from "./adapters/lean/leanweb-verifier";
 import { DemoProofModel } from "./adapters/model/demo-proof-model";
 import { NebiusProofModel } from "./adapters/model/nebius-proof-model";
 import { OpenAIProofModel } from "./adapters/model/openai-proof-model";
-import { CodexProofModel, CodexSession, runCodexCommand } from "./adapters/model/codex-proof-model";
+import { ChatGPTPlanProofModel } from "./adapters/model/chatgpt-plan-model";
+import { ChatGPTPlanSession } from "./adapters/model/chatgpt-plan-session";
 import { loadConfig, toPublicConfig } from "./config";
 import { ProofPipeline } from "./domain/proof-pipeline";
 import { RuntimeMemoryCoordinator, triggerGarbageCollection } from "./domain/runtime-memory";
 import { loadRuntimeEnvironment } from "./secret-env";
 
 const config = loadConfig(loadRuntimeEnvironment(process.env));
+const planSession = config.provider === "codex" && !config.demoMode ? new ChatGPTPlanSession({
+  directory: config.planAuthDirectory!, backendOrigin: config.planBackendOrigin!,
+  ...(config.planClientId ? { clientId: config.planClientId } : {}),
+}) : undefined;
 const memoryCoordinator = config.cloudMode && config.leanVerifier === "local" ? new RuntimeMemoryCoordinator({ evictAfterEachLean: false }) : undefined;
 const tavilyGrounder = config.tavilyGroundingEnabled
   ? new TavilyMathlibGrounder({ apiKey: config.tavilyApiKey as string })
@@ -22,10 +27,9 @@ const tavilyGrounder = config.tavilyGroundingEnabled
 const model = config.demoMode
   ? new DemoProofModel()
   : config.provider === "codex"
-    ? new CodexProofModel(
+    ? new ChatGPTPlanProofModel(
         { model: config.model, reasoningEffort: config.reasoningEffort, timeoutMs: config.codexTimeoutMs, transcriptionTimeoutMs: config.codexTranscriptionTimeoutMs },
-        runCodexCommand,
-        memoryCoordinator,
+        planSession!,
       )
   : config.provider === "nebius"
     ? new NebiusProofModel({
@@ -67,7 +71,7 @@ const app = createApp({
   ...(config.backendToken ? { backendToken: config.backendToken } : {}),
   ...(config.accessPassword ? { accessPassword: config.accessPassword } : {}),
   cloudMode: config.cloudMode,
-  ...(config.provider === "codex" ? { codexSession: new CodexSession() } : {}),
+  ...(planSession ? { codexSession: planSession, subscriptionSession: planSession } : {}),
   ...(readinessVerifier
     ? {
         readinessVerifier,

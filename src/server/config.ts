@@ -1,5 +1,7 @@
 import type { ReasoningEffort } from "./adapters/model/openai-proof-model";
 import { codexCatalog, type CodexCatalog } from "@shared/codex-options";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
 const MODEL_PROVIDERS = ["openai", "nebius", "codex"] as const;
@@ -21,6 +23,9 @@ export interface RuntimeConfig {
   reasoningEffort: ReasoningEffort;
   codexTimeoutMs: number;
   codexTranscriptionTimeoutMs: number;
+  planAuthDirectory?: string;
+  planClientId?: string;
+  planBackendOrigin?: string;
   tavilyGroundingEnabled: boolean;
   tavilyApiKey?: string;
   leanProjectPath?: string;
@@ -32,6 +37,7 @@ export interface RuntimeConfig {
 }
 
 export interface PublicRuntimeConfig {
+  subscriptionTransport?: "chatgpt-plan";
   imagePipeline?: "transcribe_then_formalize";
   codexCatalog?: CodexCatalog;
   provider: "demo" | ModelProvider;
@@ -130,6 +136,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
     reasoningEffort: reasoningEffort(provider === "codex" ? env.CODEX_REASONING_EFFORT : env.OPENAI_REASONING_EFFORT),
     codexTimeoutMs: boundedInteger(env.CODEX_GENERATION_TIMEOUT_MS, 900_000, 30_000, 1_800_000),
     codexTranscriptionTimeoutMs: boundedInteger(env.CODEX_TRANSCRIPTION_TIMEOUT_MS, 180_000, 30_000, 300_000),
+    ...(provider === "codex" ? {
+      planAuthDirectory: env.CHATGPT_PLAN_AUTH_DIR?.trim() || (cloudMode ? "/data/chatgpt-plan" : join(homedir(), ".codex", "leanbridge-chatgpt-plan")),
+      planBackendOrigin: env.CHATGPT_PLAN_BACKEND_ORIGIN?.trim() || `https://${env.RAILWAY_PUBLIC_DOMAIN?.trim() || "leanbridge-ai-production.up.railway.app"}`,
+      ...(env.CHATGPT_PLAN_CLIENT_ID?.trim() ? { planClientId: env.CHATGPT_PLAN_CLIENT_ID.trim() } : {}),
+    } : {}),
     tavilyGroundingEnabled,
     ...(tavilyGroundingEnabled && tavilyApiKey ? { tavilyApiKey } : {}),
     ...(leanProjectPath ? { leanProjectPath } : {}),
@@ -143,7 +154,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RuntimeConfig {
 
 export function toPublicConfig(config: RuntimeConfig): PublicRuntimeConfig {
   return {
-    ...(config.provider === "codex" && !config.demoMode ? { codexCatalog: codexCatalog(config), imagePipeline: "transcribe_then_formalize" as const } : {}),
+    ...(config.provider === "codex" && !config.demoMode ? { codexCatalog: codexCatalog(config), imagePipeline: "transcribe_then_formalize" as const, subscriptionTransport: "chatgpt-plan" as const } : {}),
     provider: config.demoMode ? "demo" : config.provider,
     model: config.model,
     reasoningEffort: config.reasoningEffort,

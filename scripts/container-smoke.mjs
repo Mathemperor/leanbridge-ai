@@ -91,8 +91,16 @@ try {
   assert.equal(config.body.provider, 'codex');
   assert.equal(config.body.lean?.mode, 'cloud');
   assert.equal(config.body.lean?.verifier, 'leanweb');
+  assert.equal(config.body.subscriptionTransport, 'chatgpt-plan');
   docker(['exec', name, 'sh', '-c', 'test ! -e /opt/elan && test ! -e /app/lean-project && ! command -v lean']);
   record('no-local-compiler', { ok: true });
+  docker(['exec', name, 'sh', '-c', '! command -v codex && test ! -d /usr/local/lib/node_modules/@openai/codex']);
+  record('no-codex-cli', { ok: true });
+  const subscription = await request('/api/codex/status');
+  assert.equal(subscription.status, 200);
+  assert.equal(subscription.body.transport, 'chatgpt-plan');
+  assert.equal(subscription.body.connected, false, 'CI must not contain a real user grant');
+  record('private-oauth-session-without-bundled-credentials', { ok: true });
   assert(config.body.codexCatalog?.models?.some(model => model.id === 'gpt-6.1-sol'), 'Model-selection catalog');
   record('codex-only-config-and-catalog', { provider: config.body.provider, lean: config.body.lean, modelCount: config.body.codexCatalog.models.length });
   const ready = await request('/api/ready');

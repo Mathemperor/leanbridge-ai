@@ -30,9 +30,10 @@ describe("cloud deployment configuration", () => {
     expect(dockerfile).toContain("ENV LEAN_VERIFIER=leanweb");
     const startup = await read("docker-cloud-start.sh");
     expect(startup).toContain('exec gosu leanbridge /usr/local/bin/docker-entrypoint.sh "$@"');
-    expect(startup).toContain('chmod 700 /data/codex');
+    expect(startup).toContain('chmod 700 /data/chatgpt-plan');
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/docker-cloud-start.sh"]');
-    expect(dockerfile).toContain('@openai/codex@0.163.0');
+    expect(dockerfile).not.toContain('@openai/codex');
+    expect(dockerfile).toContain('ENV CHATGPT_PLAN_AUTH_DIR=/data/chatgpt-plan');
     expect(dockerfile).toContain("docker-entrypoint.sh");
     expect(dockerfile).not.toMatch(/RUN\s+chmod\s+-R\s+a-w\s+\/app\s+\/opt\/elan/);
     expect(dockerfile).toMatch(/COPY\s+--chmod=0444\s+package\.json\s+package-lock\.json\s+\.\//);

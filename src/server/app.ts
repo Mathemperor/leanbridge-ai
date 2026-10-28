@@ -11,6 +11,7 @@ import { JobStoreCapacityError } from "./domain/job-store";
 import type { PublicRuntimeConfig } from "./config";
 import { browserAccess } from "./browser-access";
 import type { CodexSession } from "./adapters/model/codex-proof-model";
+import type { ChatGPTPlanSession } from "./adapters/model/chatgpt-plan-session";
 
 const manualVerificationSchema = z.object({
   code: z.string().trim().min(1, "Lean 代码不能为空").max(200_000),
@@ -27,11 +28,34 @@ export interface CreateAppOptions {
   readinessOptions?: VerifyOptions;
   readinessCacheTtlMs?: number;
   codexSession?: Pick<CodexSession, "status" | "startLogin">;
+  subscriptionSession?: Pick<ChatGPTPlanSession, "inspectLogin" | "completeLogin">;
 }
 
 export function createApp(options: CreateAppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
+  if (options.subscriptionSession) {
+    const router = express.Router();
+    router.use(express.json({limit:"24kb"}));
+    const fields={ticket:z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),state:z.string().regex(/^[A-Za-z0-9_-]{32,128}$/)};
+    const inspectSchema=z.object(fields).strict();
+    const callbackSchema=z.object({...fields,code:z.string().min(1).max(8192),clientId:z.string().regex(/^oaiapp_[A-Za-z0-9_-]{1,160}$/).optional()}).strict();
+    router.post("/inspect",async(request,response)=>{
+      response.set("Cache-Control","no-store");
+      const input=inspectSchema.safeParse(request.body);
+      if(!input.success){response.status(400).json({error:"授权入口无效"});return;}
+      try{const result=await options.subscriptionSession!.inspectLogin(input.data);response.json({authorizationUrl:result.authorizationUrl});}
+      catch{response.status(400).json({error:"授权入口已使用、无效或过期"});}
+    });
+    router.post("/callback",async(request,response)=>{
+      response.set("Cache-Control","no-store");
+      const input=callbackSchema.safeParse(request.body);
+      if(!input.success){response.status(400).json({error:"授权回调无效"});return;}
+      try{const result=await options.subscriptionSession!.completeLogin({ticket:input.data.ticket,state:input.data.state,code:input.data.code,...(input.data.clientId?{clientId:input.data.clientId}:{})});response.json({connected:result.connected,state:result.state,transport:"chatgpt-plan"});}
+      catch{response.status(400).json({error:"授权未完成，请查看工作台中的订阅状态"});}
+    });
+    app.use("/api/subscription",router);
+  }
   app.use(express.json({ limit: "15mb" }));
 
   app.get("/api/health", (_request, response) => {
@@ -166,9 +190,9 @@ export function createApp(options: CreateAppOptions): Express {
     });
   }
 
-  const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+  const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
     if (error?.type === "entity.too.large") {
-      response.status(413).json({ error: "上传内容超过 15 MiB 限制" });
+      response.status(413).json({ error: request.path.startsWith("/api/subscription/") ? "授权数据超过限制" : "上传内容超过 15 MiB 限制" });
       return;
     }
     response.status(500).json({ error: "服务器处理请求时发生错误" });
