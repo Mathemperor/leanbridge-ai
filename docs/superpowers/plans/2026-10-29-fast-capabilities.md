@@ -60,5 +60,5 @@ Only existing ChatGPT-plan OAuth; no API keys, CLI runtime, model/effort substit
 
 - [x] Add failing tests for application identity on normal model/catalog requests and two independent identical-body identity controls.
 - [x] Verify RED, add minimal shared identity constants and profile handling, then run full tests/build. Four new tests RED then 341 full-suite tests GREEN; typecheck/build pass, delta review clean.
-- [ ] Review the delta, publish and container-verify exact source/image, stage with a new one-shot ID and deadline.
-- [ ] Observe both real results, clear temporary variables, update the evidence and current production handoff. Default remains standard.
+- [x] Review the delta, publish and container-verify exact source/image, stage with a new one-shot ID and deadline. Source 123a6cb; GitHub run 40895773992; image sha256:fe67d8fc83929c4e1ff339ce0a61070593a9506660aafff379d4932a7788f7a2.
+- [x] Observe both real results, clear temporary variables, update the evidence and current production handoff. Deployment e8511453-3fea-4762-a7d9-6e6fbd56e505 succeeded. Both identity controls returned actual default and passed real LeanWeb (2930/2869 ms). Three temporary variables cleared, marker preserved, health HTTP 200. Actual Fast remains unachieved; upstream support/eligibility needs confirmation. No unchanged follow-up probes scheduled.
