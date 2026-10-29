@@ -1,0 +1,18 @@
+# Fast production rejection investigation
+
+The owner submitted task fd9db190-bf20-4c45-9c0a-42c23e406086 with Astra/max/fast. Production accepted it, but upstream returned HTTP 400 after 1.17 seconds. No model output or Lean verification occurred. This is a failed production acceptance, not confirmed Fast support.
+
+The current parser loses parameter/type/body-shape diagnostics for null-code API errors. Fix that proven diagnostic gap using allowlists and bounded body reads, never provider prose or tokens. A `service_tier`-specific 400 must produce a speed-specific error without switching model, reasoning, tier or billing.
+
+To investigate without asking the phone owner for repeated trials, prepare an explicit temporary release check activated only by `LEANBRIDGE_RELEASE_CHECK_ID` plus `LEANBRIDGE_RELEASE_CHECK_BEFORE`. Unset means no inference. Validate the ID and a deadline at most 24 hours ahead, claim an exclusive private-volume marker before requests, and never repeat a claimed ID on restart. Run four independent fixed natural-number controls with the existing saved subscription: omitted tier, default, fast, and the documented priority alias. Preserve Astra/max and compile model-generated code with the real existing verifier. These controls do not fulfill or retry the owner's failed proof and are not billing/tier fallback. Output only status, actual tier, compiler duration and allowlisted diagnostic metadata. Clear temporary flags after checking evidence.
+
+- [x] Save actual production failure evidence and isolate the pre-Lean HTTP failure.
+- [x] Observe failing metadata regressions, implement bounded diagnostics and one-shot release check, pass focused regressions.
+- [x] Pass full backend test/typecheck/build and one independent read-only review. Final 321 tests and build (including typecheck) passed after review corrections.
+- [ ] Publish an exact immutable verified image; stage the image and temporary check flags. Explain all four control calls in the deploy handoff and respect native approval.
+- [ ] Inspect real control results before changing the production speed transport or claiming account availability. If a specific documented alias fixes the request, apply that single verified fix; if the account/route denies Fast, say so and keep Standard usable.
+- [ ] Disable temporary checks, update delivery evidence and complete real mobile Fast/Lean acceptance when supported.
+
+Official references fetched 2026-10-29: https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery ; https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations ; https://developers.openai.com/api/docs/guides/fast-mode ; https://learn.chatgpt.com/docs/agent-configuration/speed . Official Fast support in Codex is not proof of entitlement through this saved-grant integration.
+
+Independent review: recognized auth/quota/model/transport codes now take priority over a generic 400 + service_tier parameter. The probe stops for unavailable/timed-out compilation or verifier startup/queue errors, while ordinary compiler rejection can remain an independent transport diagnostic. Both findings had observed RED→GREEN regressions; final suite/build passed after the fixes. Live account entitlement and alias acceptance remain deliberately unclaimed until production evidence.

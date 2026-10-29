@@ -25,6 +25,13 @@ export function safeProviderErrorDetail(error: unknown): string {
     const value = scalar(record[key]);
     if (value) parts.push(`${key}=${value}`);
   }
+  if (record.name === "ChatGPTPlanError") {
+    const fields={param:["service_tier","model","reasoning.effort","input","text.format","store","stream"],providerType:["invalid_request_error","permission_error","authentication_error","rate_limit_error","server_error"],bodyShape:["error","detail","json","event","unavailable"]};
+    for (const key of ["param","providerType","bodyShape"] as const) {
+      if (typeof record[key] === "string" && fields[key].includes(record[key])) parts.push(`${key}=${record[key]}`);
+    }
+    if (typeof record.requestId === "string" && /^req_[a-zA-Z0-9_-]{1,100}$/.test(record.requestId)) parts.push(`requestId=${record.requestId}`);
+  }
   if (error instanceof Error && error.name !== "Error") {
     parts.push(`name=${redact(error.name)}`);
   }

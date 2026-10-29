@@ -7,7 +7,7 @@ const messages = {
   CODEX_USAGE_LIMIT: "ChatGPT 订阅额度暂时不可用，请等待额度恢复后重试。",
   CODEX_AUTH_REQUIRED: "请在工作台重新连接 ChatGPT 订阅账号。",
   CODEX_MODEL_UNAVAILABLE: "当前订阅暂不能使用所选模型或推理强度，请选择其他配置后重试。",
-  CODEX_SPEED_UNAVAILABLE: "当前账号或模型不支持所选速度，请选择标准档后重试。未自动更换模型或计费方式。",
+  CODEX_SPEED_UNAVAILABLE: "当前订阅连接未接受所选速度参数，请选择标准档后重试。模型与计费方式未自动更换。",
   CODEX_IMAGE_REJECTED: "ChatGPT 拒绝了图片输入，请检查图片格式或重新导出图片。",
   CODEX_IMAGE_TRANSCRIPTION_REQUIRED: "Transcribe the image before text-only formalization or repair.",
   CODEX_UPSTREAM_UNAVAILABLE: "ChatGPT 上游连接暂时不可用，请稍后重试。",
@@ -20,6 +20,10 @@ const messages = {
 } as const;
 
 export type PlanResponseErrorCode = keyof typeof messages;
+const DIAGNOSTIC_PARAMS = ["service_tier","model","reasoning.effort","input","text.format","store","stream"];
+const DIAGNOSTIC_TYPES = ["invalid_request_error","permission_error","authentication_error","rate_limit_error","server_error"];
+const DIAGNOSTIC_SHAPES = ["error","detail","json","event","unavailable"];
+interface PlanErrorMetadata { status?:number;type?:string;param?:unknown;providerType?:unknown;bodyShape?:unknown;requestId?:unknown;upstreamCode?:unknown }
 
 // Constructors accept categorical metadata only. Provider prose, JSON parser
 // errors, abort reasons and fetch errors may contain proof data or credentials.
@@ -27,13 +31,23 @@ export class PlanResponseError extends Error {
   readonly code: PlanResponseErrorCode;
   readonly status?: number;
   readonly type?: string;
+  readonly param?: string;
+  readonly providerType?: string;
+  readonly bodyShape?: string;
+  readonly requestId?: string;
+  readonly upstreamCode?: string;
 
-  constructor(code: PlanResponseErrorCode, metadata: { status?: number; type?: string } = {}) {
+  constructor(code: PlanResponseErrorCode, metadata: PlanErrorMetadata = {}) {
     super(messages[code]);
     this.name = "ChatGPTPlanError";
     this.code = code;
     if (metadata.status !== undefined) this.status = metadata.status;
     if (metadata.type !== undefined && Object.hasOwn(providerErrors, metadata.type)) this.type = metadata.type;
+    if (typeof metadata.param === "string" && DIAGNOSTIC_PARAMS.includes(metadata.param)) this.param=metadata.param;
+    if (typeof metadata.providerType === "string" && DIAGNOSTIC_TYPES.includes(metadata.providerType)) this.providerType=metadata.providerType;
+    if (typeof metadata.bodyShape === "string" && DIAGNOSTIC_SHAPES.includes(metadata.bodyShape)) this.bodyShape=metadata.bodyShape;
+    if (typeof metadata.requestId === "string" && /^req_[a-zA-Z0-9_-]{1,100}$/.test(metadata.requestId)) this.requestId=metadata.requestId;
+    if (typeof metadata.upstreamCode === "string" && (Object.hasOwn(providerErrors,metadata.upstreamCode)||["none","unrecognized","subscription_sharing_unsupported_capability","unsupported_value","invalid_value","invalid_request_error"].includes(metadata.upstreamCode))) this.upstreamCode=metadata.upstreamCode;
   }
 }
 
@@ -55,15 +69,16 @@ const providerErrors: Record<string, PlanResponseErrorCode> = {
   server_error: "CODEX_UPSTREAM_UNAVAILABLE",
 };
 
-function providerFailure(value: unknown, status?: number): PlanResponseError {
+function providerFailure(value: unknown, status?: number, context:PlanErrorMetadata={}): PlanResponseError {
   const error = record(value);
-  if (error?.param === "service_tier" && (error.code === "subscription_sharing_unsupported_capability" || error.code === "unsupported_value" || error.code === "invalid_value")) {
-    return new PlanResponseError("CODEX_SPEED_UNAVAILABLE", status === undefined ? {} : {status});
-  }
+  const diagnostic:PlanErrorMetadata={...context,param:error?.param,providerType:error?.type,upstreamCode:error?.code??"none",...(status===undefined?{}:{status})};
   const type = typeof error?.code === "string" && Object.hasOwn(providerErrors, error.code) ? error.code : undefined;
+  if (!type && error?.param === "service_tier" && (status===400 || error.code === "subscription_sharing_unsupported_capability" || error.code === "unsupported_value" || error.code === "invalid_value")) {
+    return new PlanResponseError("CODEX_SPEED_UNAVAILABLE", diagnostic);
+  }
   const code = type ? providerErrors[type]! : status === 401 || status === 403 ? "CODEX_AUTH_REQUIRED"
     : status === 429 ? "CODEX_USAGE_LIMIT" : status !== undefined && status >= 500 ? "CODEX_UPSTREAM_UNAVAILABLE" : "CODEX_RESPONSE_FAILED";
-  return new PlanResponseError(code, { ...(status !== undefined ? { status } : {}), ...(type ? { type } : {}) });
+  return new PlanResponseError(code, { ...diagnostic, ...(type ? { type } : {}) });
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -104,7 +119,9 @@ async function failureMetadata(response: Response): Promise<unknown> {
 export async function readPlanStream(response: Response, options: { signal?: AbortSignal; onCompleted?: (metadata:{serviceTier?: ModelServiceTier})=>void } = {}): Promise<string> {
   if (!response.ok) {
     const body=await failureMetadata(response);
-    throw providerFailure(record(body)?.error ?? body, response.status);
+    const json=record(body);
+    const bodyShape=json&&record(json.error)?"error":json&&Object.hasOwn(json,"detail")?"detail":json?"json":"unavailable";
+    throw providerFailure(json?.error ?? body, response.status,{bodyShape,requestId:response.headers.get("x-request-id")});
   }
   if (!response.body) throw new PlanResponseError("CODEX_STREAM_INCOMPLETE");
 
@@ -145,7 +162,7 @@ export async function readPlanStream(response: Response, options: { signal?: Abo
     } else if (type === "response.incomplete") {
       throw new PlanResponseError("CODEX_RESPONSE_INCOMPLETE");
     } else if (type === "response.failed" || type === "error") {
-      throw providerFailure(record(event.response)?.error ?? event.error ?? event);
+      throw providerFailure(record(event.response)?.error ?? event.error ?? event,undefined,{bodyShape:"event",requestId:response.headers.get("x-request-id")});
     }
   }
 

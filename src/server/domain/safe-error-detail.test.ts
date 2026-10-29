@@ -26,4 +26,10 @@ describe("safeProviderErrorDetail", () => {
   it("does not expose an unclassified plain error message", () => {
     expect(safeProviderErrorDetail(new Error("provider secret details"))).toBe("");
   });
+  it("includes allowlisted plan diagnostic fields without accepting arbitrary prose",()=>{
+    const error=Object.assign(new Error("固定安全提示"),{name:"ChatGPTPlanError",status:400,code:"CODEX_RESPONSE_FAILED",param:"service_tier",providerType:"invalid_request_error",bodyShape:"error",requestId:"req_test400"});
+    expect(safeProviderErrorDetail(error)).toMatch(/param=service_tier.*providerType=invalid_request_error.*bodyShape=error.*requestId=req_test400/);
+    Object.assign(error,{param:"private-proof",providerType:"private-type",bodyShape:"private-shape",requestId:"Bearer private-token"});
+    expect(safeProviderErrorDetail(error)).not.toMatch(/private-proof|private-type|private-shape|private-token/);
+  });
 });

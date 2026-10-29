@@ -14,8 +14,10 @@ import { loadConfig, toPublicConfig } from "./config";
 import { ProofPipeline } from "./domain/proof-pipeline";
 import { RuntimeMemoryCoordinator, triggerGarbageCollection } from "./domain/runtime-memory";
 import { loadRuntimeEnvironment } from "./secret-env";
+import { runSubscriptionReleaseCheck } from "./release-check";
 
-const config = loadConfig(loadRuntimeEnvironment(process.env));
+const runtimeEnvironment=loadRuntimeEnvironment(process.env);
+const config = loadConfig(runtimeEnvironment);
 const planSession = config.provider === "codex" && !config.demoMode ? new ChatGPTPlanSession({
   directory: config.planAuthDirectory!, backendOrigin: config.planBackendOrigin!,
   ...(config.planClientId ? { clientId: config.planClientId } : {}),
@@ -85,4 +87,11 @@ app.listen(config.port, () => {
     triggerGarbageCollection();
   }
   console.log(`LeanBridge AI is running on http://localhost:${config.port}`);
+  const checkId=runtimeEnvironment.LEANBRIDGE_RELEASE_CHECK_ID;
+  const checkBefore=runtimeEnvironment.LEANBRIDGE_RELEASE_CHECK_BEFORE;
+  if(planSession&&checkId&&checkBefore){
+    void runSubscriptionReleaseCheck({id:checkId,before:checkBefore,directory:config.planAuthDirectory!,session:planSession,verifier,verifyDefaults,
+      log:result=>console.log(`LEANBRIDGE_RELEASE_CHECK=${JSON.stringify(result)}`),
+    }).catch(()=>console.log('LEANBRIDGE_RELEASE_CHECK={"status":"diagnostic-unavailable"}'));
+  }
 });
