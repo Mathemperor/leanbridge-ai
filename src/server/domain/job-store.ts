@@ -12,6 +12,7 @@ import type {
 } from "@shared/proof";
 import { editedImageTranscriptionSchema } from "@shared/proof";
 import { triggerGarbageCollection } from "./runtime-memory";
+import { MODEL_SERVICE_TIERS, type ModelServiceTier } from "@shared/codex-options";
 
 const MAX_RETAINED_ATTEMPTS = 4;
 const MAX_RETAINED_EVENTS = 64;
@@ -76,7 +77,7 @@ export class InMemoryJobStore {
       id: randomUUID(),
       mode: request.mode,
       request: cloneRequest(request),
-      ...(request.model && request.reasoningEffort ? { modelConfig: { model: request.model, reasoningEffort: request.reasoningEffort } } : {}),
+      ...(request.model && request.reasoningEffort ? { modelConfig: { model: request.model, reasoningEffort: request.reasoningEffort, ...(request.speed ? {speed:request.speed} : {}) } } : {}),
       status: "queued",
       createdAt,
       updatedAt: createdAt,
@@ -110,13 +111,14 @@ export class InMemoryJobStore {
     }
   }
 
-  recordImageTranscription(id: string, value: EditedImageTranscription, source: StoredImageTranscription["source"]): ProofJob {
+  recordImageTranscription(id: string, value: EditedImageTranscription & {serviceTier?: ModelServiceTier}, source: StoredImageTranscription["source"]): ProofJob {
     const job = this.#require(id);
     const at = now();
     job.imageTranscription = {
       ...editedImageTranscriptionSchema.parse(value),
       source,
       createdAt: at,
+      ...(source === "codex" && value.serviceTier && MODEL_SERVICE_TIERS.includes(value.serviceTier) ? {serviceTier:value.serviceTier} : {}),
       ...(job.modelConfig ? {modelConfig: {...job.modelConfig}} : {}),
     };
     job.updatedAt = at;

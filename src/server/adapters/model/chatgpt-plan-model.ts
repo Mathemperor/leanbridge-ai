@@ -1,5 +1,5 @@
 import { imageTranscriptionSchema, normalizeLeanCode, translationSchema, type ImageTranscription, type ProofRequest, type Translation } from "@shared/proof";
-import { resolveCodexSettings, type CodexSettings } from "@shared/codex-options";
+import { resolveCodexSettings, type CodexSettings, type ModelServiceTier } from "@shared/codex-options";
 import type { ProofModel, RepairContext } from "../../domain/ports";
 import { IMAGE_TRANSCRIPTION_PROMPT, imageTranscriptionInstruction, LEAN_SYSTEM_PROMPT, sourceInstruction, repairInstruction } from "./prompt";
 import { PlanResponseError, readPlanStream } from "./plan-stream";
@@ -114,6 +114,7 @@ export class ChatGPTPlanProofModel implements ProofModel {
         method: "POST", redirect: "error", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, signal,
         body: JSON.stringify({
           model: settings.model, reasoning: { effort: settings.reasoningEffort },
+          ...(settings.speed ? {service_tier:settings.speed === "fast" ? "fast" : "default"} : {}),
           instructions: stage.instructions, input: [{ role: "user", content }], store: false, stream: true,
           text: { format: { type: "json_schema", name: stage.name, strict: true, schema: stage.schema } },
         }),
@@ -121,8 +122,9 @@ export class ChatGPTPlanProofModel implements ProofModel {
     } catch {
       throw new PlanResponseError(signal.aborted ? "CODEX_TIMEOUT" : "CODEX_UPSTREAM_UNAVAILABLE");
     }
-    const text = await readPlanStream(response, { signal });
-    try { return stage.parse(JSON.parse(text)); }
+    let serviceTier: ModelServiceTier | undefined;
+    const text = await readPlanStream(response, { signal, onCompleted: metadata => {serviceTier=metadata.serviceTier;} });
+    try { return {...stage.parse(JSON.parse(text)), ...(serviceTier ? {serviceTier} : {})}; }
     catch { throw new PlanResponseError(stage.image ? "CODEX_TRANSCRIPTION_INVALID" : "CODEX_RESPONSE_INVALID"); }
   }
 }

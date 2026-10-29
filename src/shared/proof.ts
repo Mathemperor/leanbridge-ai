@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CODEX_REASONING_EFFORTS, type CodexSettings } from "./codex-options";
+import { CODEX_REASONING_EFFORTS, CODEX_SPEEDS, type CodexSettings, type ModelServiceTier } from "./codex-options";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
@@ -27,12 +27,13 @@ export const imageTranscriptionSchema = z.object({
   uncertainties: z.array(z.string().max(200)).max(20),
 });
 
-export type ImageTranscription = z.infer<typeof imageTranscriptionSchema>;
+export type ImageTranscription = z.infer<typeof imageTranscriptionSchema> & {serviceTier?: ModelServiceTier};
 export const editedImageTranscriptionSchema = imageTranscriptionSchema.extend({
   context: z.string().trim().max(10_000).optional(),
 });
 export type EditedImageTranscription = z.infer<typeof editedImageTranscriptionSchema>;
 export interface StoredImageTranscription extends EditedImageTranscription {
+  serviceTier?: ModelServiceTier;
   source: "codex" | "edited";
   createdAt: string;
   modelConfig?: CodexSettings;
@@ -53,6 +54,7 @@ export function formatImageTranscription(value: ImageTranscription, context?: st
 const commonRequestFields = {
   model: z.string().trim().min(1).max(100).optional(),
   reasoningEffort: z.enum(CODEX_REASONING_EFFORTS).optional(),
+  speed: z.enum(CODEX_SPEEDS).optional(),
   projectPath: z.string().trim().max(4_096).optional(),
   autoRepair: z.boolean().default(true),
 };
@@ -84,7 +86,7 @@ export const translationSchema = z.object({
   notes: z.array(z.string().max(4_000)).max(64),
 });
 
-export type Translation = z.infer<typeof translationSchema>;
+export type Translation = z.infer<typeof translationSchema> & {serviceTier?: ModelServiceTier};
 
 export type DiagnosticSeverity = "error" | "warning" | "info";
 

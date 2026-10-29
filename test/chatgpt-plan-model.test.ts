@@ -13,6 +13,55 @@ const response = (value: unknown) => new Response(new TextEncoder().encode(`data
 afterEach(() => vi.useRealTimers());
 
 describe("ChatGPT plan proof model", () => {
+  it.each([["fast", "fast"], ["standard", "default"], [undefined, undefined]] as const)("routes selected speed %s without changing model or effort", async (speed, tier) => {
+    let payload: Record<string, unknown> = {};
+    const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "max" }, session(), async (_url, init) => {
+      payload = JSON.parse(String(init?.body));
+      return response(translation);
+    });
+    await model.translate({ ...text, ...(speed ? { speed } : {}) });
+    expect(payload).toMatchObject({ model: "gpt-6-astra", reasoning: { effort: "max" } });
+    if (tier) expect(payload.service_tier).toBe(tier);
+    else expect(payload).not.toHaveProperty("service_tier");
+  });
+
+  it("retains speed through image recognition, text-only generation and compiler-guided repair", async () => {
+    const { ProofPipeline } = await import("../src/server/domain/proof-pipeline");
+    const requests: Record<string, any>[] = [];
+    const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, session(), async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)));
+      const value = requests.length === 1 ? transcription : translation;
+      return new Response(`data: ${JSON.stringify({type:"response.output_text.delta",delta:JSON.stringify(value)})}\n\ndata: ${JSON.stringify({type:"response.completed",response:{status:"completed",service_tier:requests.length===1?"priority":"fast"}})}\n\n`);
+    });
+    let checks = 0;
+    const pipeline = new ProofPipeline({ model, verifier: { verify: async () => ({ok:++checks>1,status:checks>1?"verified":"failed",command:"test Lean",durationMs:1,output:"type mismatch",diagnostics:[]}) } });
+    const job = pipeline.start({...image,autoRepair:true,speed:"fast",model:"gpt-6-astra",reasoningEffort:"high"});
+    await pipeline.run(job.id);
+    const result = pipeline.get(job.id)!;
+    expect(result.status).toBe("verified");
+    expect(requests.map(r=>r.service_tier)).toEqual(["fast","fast","fast"]);
+    expect(result.modelConfig).toMatchObject({model:"gpt-6-astra",reasoningEffort:"high",speed:"fast"});
+    expect(result.imageTranscription?.serviceTier).toBe("priority");
+    expect(result.translation?.serviceTier).toBe("fast");
+  });
+
+  it("records a provider downgrade and never trusts a generated tier claim", async () => {
+    const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, session(), async () => new Response(`data: ${JSON.stringify({type:"response.output_text.delta",delta:JSON.stringify({...translation,serviceTier:"fast"})})}\n\ndata: ${JSON.stringify({type:"response.completed",response:{status:"completed",service_tier:"default"}})}\n\n`));
+    expect(await model.translate({...text,speed:"fast"})).toMatchObject({serviceTier:"default"});
+  });
+
+  it("isolates queued speed choices and does not silently retry unsupported Fast", async () => {
+    const tiers: unknown[] = [];
+    const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, session(), async (_url, init) => {
+      tiers.push(JSON.parse(String(init?.body)).service_tier);
+      return tiers.length===1 ? Response.json({error:{code:"subscription_sharing_unsupported_capability",param:"service_tier",message:"private proof"}},{status:400}) : response(translation);
+    });
+    const results = await Promise.allSettled([model.translate({...text,speed:"fast"}),model.translate({...text,speed:"standard"})]);
+    expect(results[0]).toMatchObject({status:"rejected",reason:{code:"CODEX_SPEED_UNAVAILABLE"}});
+    expect(results[1].status).toBe("fulfilled");
+    expect(tiers).toEqual(["fast","default"]);
+  });
+
   it("uses OAuth Responses with the exact selected settings and strict structured output", async () => {
     const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "high" }, session(), async (url, init) => {
       expect(url).toBe("https://api.openai.com/v1/responses");

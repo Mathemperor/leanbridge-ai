@@ -1,3 +1,4 @@
+import { MODEL_SERVICE_TIERS, type ModelServiceTier } from "@shared/codex-options";
 const MAX_STREAM_BYTES = 2 * 1024 * 1024;
 
 const messages = {
@@ -6,6 +7,7 @@ const messages = {
   CODEX_USAGE_LIMIT: "ChatGPT 订阅额度暂时不可用，请等待额度恢复后重试。",
   CODEX_AUTH_REQUIRED: "请在工作台重新连接 ChatGPT 订阅账号。",
   CODEX_MODEL_UNAVAILABLE: "当前订阅暂不能使用所选模型或推理强度，请选择其他配置后重试。",
+  CODEX_SPEED_UNAVAILABLE: "当前账号或模型不支持所选速度，请选择标准档后重试。未自动更换模型或计费方式。",
   CODEX_IMAGE_REJECTED: "ChatGPT 拒绝了图片输入，请检查图片格式或重新导出图片。",
   CODEX_IMAGE_TRANSCRIPTION_REQUIRED: "Transcribe the image before text-only formalization or repair.",
   CODEX_UPSTREAM_UNAVAILABLE: "ChatGPT 上游连接暂时不可用，请稍后重试。",
@@ -37,6 +39,8 @@ export class PlanResponseError extends Error {
 
 const providerErrors: Record<string, PlanResponseErrorCode> = {
   rate_limit_exceeded: "CODEX_USAGE_LIMIT",
+  subscription_sharing_usage_limit_exceeded: "CODEX_USAGE_LIMIT",
+  subscription_sharing_usage_unavailable: "CODEX_UPSTREAM_UNAVAILABLE",
   usage_limit_reached: "CODEX_USAGE_LIMIT",
   insufficient_quota: "CODEX_USAGE_LIMIT",
   model_not_found: "CODEX_MODEL_UNAVAILABLE",
@@ -53,6 +57,9 @@ const providerErrors: Record<string, PlanResponseErrorCode> = {
 
 function providerFailure(value: unknown, status?: number): PlanResponseError {
   const error = record(value);
+  if (error?.param === "service_tier" && (error.code === "subscription_sharing_unsupported_capability" || error.code === "unsupported_value" || error.code === "invalid_value")) {
+    return new PlanResponseError("CODEX_SPEED_UNAVAILABLE", status === undefined ? {} : {status});
+  }
   const type = typeof error?.code === "string" && Object.hasOwn(providerErrors, error.code) ? error.code : undefined;
   const code = type ? providerErrors[type]! : status === 401 || status === 403 ? "CODEX_AUTH_REQUIRED"
     : status === 429 ? "CODEX_USAGE_LIMIT" : status !== undefined && status >= 500 ? "CODEX_UPSTREAM_UNAVAILABLE" : "CODEX_RESPONSE_FAILED";
@@ -77,10 +84,27 @@ function terminalText(response: Record<string, unknown>): string | undefined {
   return texts.length ? texts.join("") : undefined;
 }
 
-export async function readPlanStream(response: Response, options: { signal?: AbortSignal } = {}): Promise<string> {
+async function failureMetadata(response: Response): Promise<unknown> {
+  if (!response.body) return undefined;
+  const reader=response.body.getReader(), decoder=new TextDecoder("utf-8",{fatal:true});
+  let bytes=0, text="";
+  try {
+    for (;;) {
+      const chunk=await reader.read();
+      if (chunk.done) break;
+      bytes+=chunk.value.byteLength;
+      if (bytes>16*1024) return undefined;
+      text+=decoder.decode(chunk.value,{stream:true});
+    }
+    return JSON.parse(text+decoder.decode());
+  } catch { return undefined; }
+  finally { void reader.cancel().catch(()=>{}); reader.releaseLock(); }
+}
+
+export async function readPlanStream(response: Response, options: { signal?: AbortSignal; onCompleted?: (metadata:{serviceTier?: ModelServiceTier})=>void } = {}): Promise<string> {
   if (!response.ok) {
-    void response.body?.cancel().catch(() => {});
-    throw providerFailure(undefined, response.status);
+    const body=await failureMetadata(response);
+    throw providerFailure(record(body)?.error ?? body, response.status);
   }
   if (!response.body) throw new PlanResponseError("CODEX_STREAM_INCOMPLETE");
 
@@ -116,6 +140,8 @@ export async function readPlanStream(response: Response, options: { signal?: Abo
       if (completed?.status !== "completed") throw new PlanResponseError("CODEX_RESPONSE_INCOMPLETE");
       result = terminalText(completed) ?? text;
       if (!result.trim()) throw new PlanResponseError("CODEX_RESPONSE_INVALID");
+      const tier=completed.service_tier;
+      options.onCompleted?.(typeof tier === "string" && MODEL_SERVICE_TIERS.includes(tier as ModelServiceTier) ? {serviceTier:tier as ModelServiceTier} : {});
     } else if (type === "response.incomplete") {
       throw new PlanResponseError("CODEX_RESPONSE_INCOMPLETE");
     } else if (type === "response.failed" || type === "error") {

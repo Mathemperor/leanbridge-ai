@@ -13,6 +13,36 @@ function stream(parts: string[], cancel?: () => void): Response {
 }
 
 describe("ChatGPT plan response stream", () => {
+  it.each([["subscription_sharing_usage_limit_exceeded","CODEX_USAGE_LIMIT"],["subscription_sharing_usage_unavailable","CODEX_UPSTREAM_UNAVAILABLE"]])("preserves subscription error category %s after the stream opens", async (code,expected) => {
+    const error=await readPlanStream(stream([event({type:"response.failed",response:{status:"failed",error:{code,message:"private-proof private-token"}}})])).catch(e=>e);
+    expect(error.code).toBe(expected);
+    expect(String(error)+JSON.stringify(error)).not.toMatch(/private-proof|private-token/);
+  });
+  it.each(["fast","priority","default","auto"])("reports actual %s tier from terminal metadata only", async tier => {
+    let metadata: unknown;
+    const value = await readPlanStream(stream([completed({service_tier:tier,output:[{type:"message",content:[{type:"output_text",text:"proof"}]}]})]),{onCompleted:m=>{metadata=m;}});
+    expect(value).toBe("proof");
+    expect(metadata).toEqual({serviceTier:tier});
+  });
+  it("omits unknown provider tier metadata rather than exposing it", async () => {
+    let metadata: unknown;
+    await readPlanStream(stream([completed({service_tier:"private-token",output:[{type:"message",content:[{type:"output_text",text:"proof"}]}]})]),{onCompleted:m=>{metadata=m;}});
+    expect(metadata).toEqual({});
+  });
+  it("categorizes an unsupported service tier without retaining provider text", async () => {
+    const error = await readPlanStream(Response.json({error:{code:"subscription_sharing_unsupported_capability",param:"service_tier",message:"private-proof Bearer private-token"}},{status:400})).catch(e=>e);
+    expect(error).toMatchObject({code:"CODEX_SPEED_UNAVAILABLE",status:400});
+    expect(String(error)+JSON.stringify(error)).not.toMatch(/private-proof|private-token/);
+  });
+  it("bounds error-body reads and cancels oversized untrusted diagnostics", async () => {
+    let cancelled=false,pulled=0;
+    const body = new ReadableStream<Uint8Array>({pull(c){pulled++;c.enqueue(encoder.encode("private-token".repeat(1000)));},cancel(){cancelled=true;}});
+    const error = await readPlanStream(new Response(body,{status:400})).catch(e=>e);
+    expect(error.code).toBe("CODEX_RESPONSE_FAILED");
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThanOrEqual(4);
+    expect(String(error)+JSON.stringify(error)).not.toContain("private-token");
+  });
   it("accepts a headerless stream with delta-only terminal completion", async () => {
     const response = stream([
       event({ type: "response.output_text.delta", delta: '{"leanCode":' }),

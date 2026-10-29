@@ -134,7 +134,7 @@ export function createApp(options: CreateAppOptions): Express {
     if (options.publicConfig.provider === "codex") {
       try { Object.assign(parsed.data, resolveCodexSettings(parsed.data, options.publicConfig)); }
       catch (error) { response.status(400).json({ error: (error as Error).message }); return; }
-    } else if (parsed.data.model || parsed.data.reasoningEffort) {
+    } else if (parsed.data.model || parsed.data.reasoningEffort || parsed.data.speed) {
       response.status(400).json({ error: "模型选择仅适用于 Codex 订阅模式。" }); return;
     }
     try {

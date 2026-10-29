@@ -26,6 +26,8 @@ Session files have private permissions, authenticated encryption and atomic writ
 
 This workbench uses the granted ChatGPT plan allowance, without an inference API key or automatic billing-provider fallback. Keep `OPENAI_API_KEY` empty for this subscription deployment. The public provider name remains `codex` for compatibility; `subscriptionTransport: chatgpt-plan` identifies the new transport.
 
+The mobile speed selector defaults to **Standard** and optionally requests official **Fast** (`service_tier: fast`) for recognition, proof generation and repairs. It preserves the chosen model and reasoning effort. Fast currently consumes approximately 2.5 times the included subscription allowance; the approximately 1.5x Codex speed guidance applies to GPT-5.6, not a guaranteed multiplier for Astra or complete proof jobs. Results, history and exports distinguish requested speed from the actual tier reported by the provider, including downgrades and missing metadata. Unsupported Fast returns a clear error without automatic model, tier or billing fallback. See the [Fast design](docs/superpowers/specs/2026-10-29-fast-speed-design.md) and [official speed guidance](https://learn.chatgpt.com/docs/agent-configuration/speed).
+
 See the [production design](docs/superpowers/specs/2026-10-28-chatgpt-plan-design.md) and [implementation ledger](docs/superpowers/plans/2026-10-28-chatgpt-plan-progress.md). Official protocol references: [sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms), [models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 
 ## Historical development profiles
