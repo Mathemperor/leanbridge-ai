@@ -27,11 +27,13 @@ async function fixture(existingClient: string | undefined = clientId) {
   let claims: Record<string, unknown> = {};
   let tokenOverrides: Record<string, unknown> = {};
   let catalogModels: unknown[] = [{ slug: 'plan-model', display_name: 'Plan Model', visibility: 'list' }, { slug: 'hidden-model', visibility: 'hide' }];
+  const catalogHeaders: Headers[] = [];
   let onExchange: (() => Promise<void>) | undefined;
   const requests: URLSearchParams[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url === 'https://api.openai.com/v1/models') {
+      catalogHeaders.push(new Headers(init?.headers));
       expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer access-${counter}`);
       return Response.json({ models: catalogModels });
     }
@@ -68,7 +70,7 @@ async function fixture(existingClient: string | undefined = clientId) {
     return state.setup!;
   };
   const login = async () => { const setup = await start(); return session.completeLogin({ ticket: setup.ticket, state: setup.state, code: 'one-use-code', clientId }); };
-  return { directory, session, options, start, login, requests, get refreshCount() { return refreshCount; },
+  return { directory, session, options, start, login, requests, catalogHeaders, get refreshCount() { return refreshCount; },
     advance: (ms: number) => { now += ms; }, setMode: (value: string) => { mode = value; },
     setClaims: (value: Record<string, unknown>) => { claims = value; }, setTokens: (value: Record<string, unknown>) => { tokenOverrides = value; },
     setCatalog: (value: unknown[]) => { catalogModels = value; },
@@ -76,6 +78,11 @@ async function fixture(existingClient: string | undefined = clientId) {
 }
 
 describe('ChatGPTPlanSession', () => {
+  it('identifies the actual application on public catalog requests without internal client headers', async()=>{
+    const f=await fixture();await f.login();await f.session.catalog();await f.session.inspectTierCatalog();
+    expect(f.catalogHeaders).toHaveLength(2);
+    for(const headers of f.catalogHeaders){expect(headers.get('originator')).toBe('LeanBridge AI');expect(headers.get('user-agent')).toBe('LeanBridgeAI/0.1.0');expect([...headers.keys()].some(name=>name.startsWith('x-codex')||name.startsWith('x-openai-internal'))).toBe(false);}
+  });
   it('projects account-specific tier metadata without descriptions, arbitrary strings or hidden rows', async () => {
     const f = await fixture(); await f.login();
     f.setCatalog([

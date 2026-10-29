@@ -3,11 +3,12 @@ import type {ModelServiceTier} from "@shared/codex-options";
 import type {PlanModelSession} from "./adapters/model/chatgpt-plan-model";
 import type {PlanTierCapability} from "./adapters/model/chatgpt-plan-session";
 import {PlanResponseError,readPlanStream} from "./adapters/model/plan-stream";
+import {PLAN_REQUEST_IDENTITY} from "./adapters/model/plan-request-identity";
 import {ProofPipeline} from "./domain/proof-pipeline";
 import type {LeanVerifier,VerifyOptions} from "./domain/ports";
 
 interface Options {
-  id:string;deadline:number;
+  id:string;deadline:number;identityControl?:boolean;
   session:PlanModelSession & {inspectTierCatalog?:(signal?:AbortSignal)=>Promise<PlanTierCapability[]>};
   verifier:LeanVerifier;verifyDefaults:VerifyOptions;fetchImpl?:typeof fetch;
   log:(result:Record<string,unknown>)=>void;
@@ -45,20 +46,25 @@ async function errorClues(response:Response):Promise<Record<string,unknown>> {
 
 /** Caller has already claimed the ID durably. This function has no public endpoint. */
 export async function runTierCapabilityCheck(options:Options):Promise<void> {
+  const profile=options.identityControl?"request-identity-v1":"tier-capabilities-v1";
   if(Date.now()>=options.deadline)return;
   const overallSignal=AbortSignal.timeout(Math.max(1,options.deadline-Date.now()));
   let visible:string[];
   try {
     if(options.session.inspectTierCatalog){
       const catalog=await within(overallSignal,()=>options.session.inspectTierCatalog!(overallSignal));visible=catalog.map(row=>row.slug);
-      options.log({checkId:options.id,profile:"tier-capabilities-v1",phase:"catalog",models:catalog.filter(row=>selectedModels.includes(row.slug)).map(row=>({
+      options.log({checkId:options.id,profile,phase:"catalog",models:catalog.filter(row=>selectedModels.includes(row.slug)).map(row=>({
         model:row.slug,serviceTiers:row.serviceTiers.filter(tier=>TIER_IDS.includes(tier)),additionalSpeedTiers:row.additionalSpeedTiers.filter(tier=>TIER_IDS.includes(tier)),
         ...(row.defaultServiceTier&&TIER_IDS.includes(row.defaultServiceTier)?{defaultServiceTier:row.defaultServiceTier}:{}),metadataFields:row.metadataFields.filter(field=>TIER_FIELDS.includes(field)),
       }))});
-    }else{visible=(await within(overallSignal,()=>options.session.catalog())).filter(row=>row.visibility==="list").map(row=>row.slug);options.log({checkId:options.id,profile:"tier-capabilities-v1",phase:"catalog",status:"metadata-unavailable"});}
+    }else{visible=(await within(overallSignal,()=>options.session.catalog())).filter(row=>row.visibility==="list").map(row=>row.slug);options.log({checkId:options.id,profile,phase:"catalog",status:"metadata-unavailable"});}
   } catch {options.log({checkId:options.id,phase:"catalog",status:"unavailable"});return;}
   if(!visible.includes("gpt-6-astra")){options.log({checkId:options.id,phase:"catalog",status:"model-unavailable"});return;}
-  for(const tier of ["default","priority","fast"]){
+  const variants=options.identityControl
+    ?[{name:"priority-without-identity",tier:"priority",identity:false},{name:"priority-with-app-identity",tier:"priority",identity:true}]
+    :["default","priority","fast"].map(tier=>({name:`minimal-${tier}`,tier,identity:false}));
+  for(const variant of variants){
+    const tier=variant.tier;
     if(Date.now()>=options.deadline)break;
     let failure:PlanResponseError|undefined,clues:Record<string,unknown>|undefined;
     const pipeline=new ProofPipeline({model:{translate:async()=>{
@@ -67,7 +73,7 @@ export async function runTierCapabilityCheck(options:Options):Promise<void> {
         const token=await within(signal,()=>options.session.accessToken());if(!token)throw new PlanResponseError("CODEX_AUTH_REQUIRED");
         if(signal.aborted)throw new PlanResponseError("CODEX_TIMEOUT");
         const response=await within(signal,()=>(options.fetchImpl??fetch)("https://api.openai.com/v1/responses",{method:"POST",redirect:"error",signal,
-          headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+          headers:{...(variant.identity?PLAN_REQUEST_IDENTITY:{}),Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
           body:JSON.stringify({model:"gpt-6-astra",reasoning:{effort:"max"},service_tier:tier,input:[{role:"user",content:[{type:"input_text",text:prompt}]}],store:false,stream:true})}));
         if(!response.ok)clues=await within(signal,()=>errorClues(response.clone()));
         let actual:ModelServiceTier|undefined;
@@ -87,7 +93,7 @@ export async function runTierCapabilityCheck(options:Options):Promise<void> {
     }},verifyDefaults:options.verifyDefaults,maxRepairAttempts:0});
     const job=pipeline.start({mode:"latex",latex:prompt,model:"gpt-6-astra",reasoningEffort:"max",autoRepair:false});
     await pipeline.run(job.id);const result=pipeline.get(job.id)!;
-    options.log({checkId:options.id,profile:"tier-capabilities-v1",variant:`minimal-${tier}`,model:"gpt-6-astra",reasoningEffort:"max",status:result.status,
+    options.log({checkId:options.id,profile,variant:variant.name,model:"gpt-6-astra",reasoningEffort:"max",status:result.status,
       ...(result.translation?.serviceTier?{serviceTier:result.translation.serviceTier}:{}),
       ...(result.verification?{lean:{ok:result.verification.ok,status:result.verification.status,durationMs:result.verification.durationMs}}:{}),
       ...(failure?{error:{code:failure.code,status:failure.status,upstreamCode:failure.upstreamCode,param:failure.param,providerType:failure.providerType,bodyShape:failure.bodyShape,requestId:failure.requestId}}:{}),...(clues?{errorClues:clues}:{})});

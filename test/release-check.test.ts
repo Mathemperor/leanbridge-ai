@@ -14,6 +14,16 @@ function completed(tier:string){return new Response(`data: ${JSON.stringify({typ
 function plainCompleted(tier:string,text=translation.leanCode){return new Response(`data: ${JSON.stringify({type:"response.completed",response:{status:"completed",service_tier:tier,output:[{type:"message",content:[{type:"output_text",text}]}]}})}\n\n`);}
 
 describe("one-shot subscription release check",()=>{
+  it('compares exactly two identical priority bodies with and without real application attribution once',async()=>{
+    const bodies:unknown[]=[],headers:Headers[]=[],logs:Array<Record<string,unknown>>=[];
+    const options={profile:'request-identity-v1',id:'fast-20261029-identity1',before:new Date(Date.now()+60000).toISOString(),directory:await directory(),session,verifier,verifyDefaults:{},log:(x:Record<string,unknown>)=>logs.push(x),fetchImpl:(async(_url,init)=>{bodies.push(JSON.parse(String(init?.body)));headers.push(new Headers(init?.headers));return plainCompleted(headers.length===1?'default':'priority');}) as typeof fetch};
+    await runSubscriptionReleaseCheck(options);await runSubscriptionReleaseCheck(options);
+    expect(bodies).toHaveLength(2);expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0]).toMatchObject({model:'gpt-6-astra',reasoning:{effort:'max'},service_tier:'priority',store:false,stream:true});
+    expect(headers[0]!.get('originator')).toBeNull();expect(headers[1]!.get('originator')).toBe('LeanBridge AI');expect(headers[1]!.get('user-agent')).toBe('LeanBridgeAI/0.1.0');
+    expect(logs.filter(x=>x.variant).map(x=>({variant:x.variant,serviceTier:x.serviceTier,status:x.status}))).toEqual([{variant:'priority-without-identity',serviceTier:'default',status:'verified'},{variant:'priority-with-app-identity',serviceTier:'priority',status:'verified'}]);
+    expect(JSON.stringify(logs)).not.toMatch(/private-token|theorem release_nat|x-openai-internal/);
+  });
   it.each(['catalog','token'])('ends the capability check at the overall deadline while %s is stalled',async phase=>{
     let calls=0;const never=new Promise<never>(()=>{});
     const check=runSubscriptionReleaseCheck({profile:'tier-capabilities-v1',id:`fast-20261029-dead${phase}`,before:new Date(Date.now()+100).toISOString(),directory:await directory(),
@@ -35,7 +45,7 @@ describe("one-shot subscription release check",()=>{
       expect(calls).toBe(1);expect(compiles).toBe(0);
     }finally{clock.mockRestore();}
   });
-  it.each(['tier-capabilities-v1','compatibility'])('stops a shared 403 even if the provider also labels it a tier error: %s',async profile=>{
+  it.each(['tier-capabilities-v1','compatibility','request-identity-v1'])('stops a shared 403 even if the provider also labels it a tier error: %s',async profile=>{
     let calls=0;
     await runSubscriptionReleaseCheck({profile,id:`fast-20261029-shared${profile==='compatibility'?1:2}`,before:new Date(Date.now()+60000).toISOString(),directory:await directory(),session,verifier,verifyDefaults:{},log:()=>{},
       fetchImpl:async()=>{calls++;return Response.json({error:{code:'unsupported_value',param:'service_tier'}},{status:403});}});

@@ -3,6 +3,7 @@ import { resolveCodexSettings, type CodexSettings, type ModelServiceTier } from 
 import type { ProofModel, RepairContext } from "../../domain/ports";
 import { IMAGE_TRANSCRIPTION_PROMPT, imageTranscriptionInstruction, LEAN_SYSTEM_PROMPT, sourceInstruction, repairInstruction } from "./prompt";
 import { PlanResponseError, readPlanStream } from "./plan-stream";
+import { PLAN_REQUEST_IDENTITY } from "./plan-request-identity";
 
 export interface PlanModelSession {
   accessToken(): Promise<string>;
@@ -111,7 +112,7 @@ export class ChatGPTPlanProofModel implements ProofModel {
     let response: Response;
     try {
       response = await this.fetchImpl("https://api.openai.com/v1/responses", {
-        method: "POST", redirect: "error", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, signal,
+        method: "POST", redirect: "error", headers: { ...PLAN_REQUEST_IDENTITY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, signal,
         body: JSON.stringify({
           model: settings.model, reasoning: { effort: settings.reasoningEffort },
           // Use the documented Fast alias accepted by this subscription route.

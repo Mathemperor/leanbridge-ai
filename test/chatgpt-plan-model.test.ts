@@ -13,6 +13,13 @@ const response = (value: unknown) => new Response(new TextEncoder().encode(`data
 afterEach(() => vi.useRealTimers());
 
 describe("ChatGPT plan proof model", () => {
+  it('identifies LeanBridge itself during recognition, formalization and repair',async()=>{
+    const headers:Headers[]=[];
+    const model=new ChatGPTPlanProofModel({model:'gpt-6-astra',reasoningEffort:'max'},session(),async(_url,init)=>{headers.push(new Headers(init?.headers));return response(headers.length===1?transcription:translation);});
+    await model.transcribeImage(image);await model.translate(text);await model.repair({source:text,translation,diagnostics:'type mismatch'});
+    expect(headers).toHaveLength(3);
+    for(const item of headers){expect(item.get('originator')).toBe('LeanBridge AI');expect(item.get('user-agent')).toBe('LeanBridgeAI/0.1.0');expect([...item.keys()].some(name=>name.startsWith('x-codex')||name.startsWith('x-openai-internal'))).toBe(false);}
+  });
   it.each([["fast", "priority"], ["standard", "default"], [undefined, undefined]] as const)("routes selected speed %s without changing model or effort", async (speed, tier) => {
     let payload: Record<string, unknown> = {};
     const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "max" }, session(), async (_url, init) => {

@@ -25,3 +25,11 @@ Alternatives considered: repeating the phone model test adds no new evidence; fi
 ## Acceptance
 
 Unit tests pin one-shot behavior, privacy, exact request shape, same model/effort, deadline/admission failures and actual-tier retention. Build a container in GitHub Actions and run real positive/negative/sorry LeanWeb checks before staging its immutable image. Runtime controls remain pending until that exact image is deployed and terminal results are read.
+
+## Evidence-driven follow-up: application attribution
+
+The first deployed profile completed: the actual cloud catalog advertises priority/Fast, but minimal priority still reports default; literal fast returns a service-tier unsupported clue. Both completed model outputs passed LeanWeb. All temporary variables were cleared.
+
+A loopback-only protocol fixture of the installed official client confirmed the same priority body value and showed application attribution via originator and User-Agent. No live model, account credential or subscription allowance was used in that fixture. Add the application's actual registered name hint, `LeanBridge AI`, as originator and `LeanBridgeAI/0.1.0` as User-Agent on public catalog/inference requests. Never copy first-party identity or internal x-codex headers. This is a diagnostic hypothesis, not a documented requirement or a confirmed acceleration fix.
+
+Add a `request-identity-v1` profile with exactly two serial controls: identical Astra / Max / priority bodies, one without application attribution and one with the real application identity. All existing admission, deadline, claim, privacy and compiler safeguards apply. Capture actual terminal tier and Lean result; clear all temporary variables afterwards. If both remain default, preserve the evidence and report that actual Fast remains unavailable on this tested route instead of repeating unchanged requests.

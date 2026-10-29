@@ -16,13 +16,14 @@ interface Options {
 /** Explicit, temporary release diagnostics. No endpoint, tokens or proof text are exposed.
  * Claim before inference so restarts never repeat allowance use for the same check ID. */
 export async function runSubscriptionReleaseCheck(options:Options):Promise<void> {
-  if(options.profile!==undefined&&options.profile!=="compatibility"&&options.profile!=="tier-capabilities-v1")return;
+  if(options.profile!==undefined&&options.profile!=="compatibility"&&options.profile!=="tier-capabilities-v1"&&options.profile!=="request-identity-v1")return;
   const deadline=Date.parse(options.before);
   if (!/^fast-\d{8}-[a-z0-9]{1,16}$/.test(options.id)||!Number.isFinite(deadline)||deadline<=Date.now()||deadline>Date.now()+24*60*60*1000) return;
   await mkdir(options.directory,{recursive:true,mode:0o700});
   try {const claim=await open(join(options.directory,`release-${options.id}.claimed`),"wx",0o600);await claim.close();}
   catch(error){if(error&&typeof error==="object"&&"code" in error&&error.code==="EEXIST")return;throw new Error("RELEASE_CHECK_STORAGE_FAILED");}
   if(options.profile==="tier-capabilities-v1")return runTierCapabilityCheck({...options,deadline});
+  if(options.profile==="request-identity-v1")return runTierCapabilityCheck({...options,deadline,identityControl:true});
   const variants=[{name:"legacy"},{name:"standard",speed:"standard"},{name:"fast",speed:"fast"},{name:"priority-alias",speed:"fast"}] as const;
   for(const variant of variants){
     if(Date.now()>=deadline)break;

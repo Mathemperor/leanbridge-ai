@@ -46,8 +46,19 @@ Only existing ChatGPT-plan OAuth; no API keys, CLI runtime, model/effort substit
 
 ### Task 3: Publish and observe
 
-- [ ] Publish a verified source commit using the expected-head lease; record exact commit and image digest.
-- [ ] Require GitHub Actions real LeanWeb container checks to pass.
-- [ ] Stage the immutable image and bounded temporary ID/deadline/profile in the existing service, preserving auth volume.
-- [ ] Respect deployment tool approval; if cancelled, provide the exact official manual deploy step.
-- [ ] After acknowledged deployment, read terminal safe results, clear temporary variables, preserve evidence and report actual tier truthfully.
+- [x] Publish a verified source commit using the expected-head lease; record exact commit and image digest.
+- [x] Require GitHub Actions real LeanWeb container checks to pass.
+- [x] Stage the immutable image and bounded temporary ID/deadline/profile in the existing service, preserving auth volume.
+- [x] Respect deployment tool approval; if cancelled, provide the exact official manual deploy step.
+- [x] After acknowledged deployment, read terminal safe results, clear temporary variables, preserve evidence and report actual tier truthfully. 4fa421c controls completed; no actual Fast, flags cleared.
+
+### Task 4: Bounded application-identity control from protocol evidence
+
+**Files:** new `src/server/adapters/model/plan-request-identity.ts`; model/session/release-check/tier-capability-check modules; corresponding model/session/release tests.
+
+**Interface:** shared `PLAN_APP_NAME` and `PLAN_REQUEST_IDENTITY` constants; `request-identity-v1` selects exactly two identical priority payloads with/without the application's real identity. No internal or first-party headers.
+
+- [x] Add failing tests for application identity on normal model/catalog requests and two independent identical-body identity controls.
+- [x] Verify RED, add minimal shared identity constants and profile handling, then run full tests/build. Four new tests RED then 341 full-suite tests GREEN; typecheck/build pass, delta review clean.
+- [ ] Review the delta, publish and container-verify exact source/image, stage with a new one-shot ID and deadline.
+- [ ] Observe both real results, clear temporary variables, update the evidence and current production handoff. Default remains standard.

@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, 
 import { chmod, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRemoteJWKSet, customFetch, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { PLAN_APP_NAME, PLAN_REQUEST_IDENTITY } from './plan-request-identity';
 
 const ISSUER = 'https://auth.openai.com';
 const RESOURCE = 'https://api.openai.com/v1';
@@ -141,7 +142,7 @@ export class ChatGPTPlanSession {
         url.search = new URLSearchParams({ client_id: clientId ?? 'dynamic_agent_client', ext_agent_host_id: this.hostId,
           response_type: 'code', redirect_uri: REDIRECT, scope: SCOPES, resource: RESOURCE, state, nonce,
           code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url') }).toString();
-        if (!clientId) url.searchParams.set('agent_name_hint', 'LeanBridge AI');
+        if (!clientId) url.searchParams.set('agent_name_hint', PLAN_APP_NAME);
         const setup = { authorizationUrl: url.toString(), ticket, state, completeUrl: `${this.backendOrigin}/api/subscription/callback` };
         this.attempt = { ticket, state, nonce, verifier, expiresAt: this.now() + 600_000, ...(clientId ? { clientId } : {}), setup };
         this.lastFailure = undefined;
@@ -243,7 +244,7 @@ export class ChatGPTPlanSession {
     const token = await this.accessToken();
     if(signal?.aborted)fail('PLAN_CATALOG_UNAVAILABLE');
     const timeout=AbortSignal.timeout(30_000);
-    const response = await this.fetchImpl(`${RESOURCE}/models`, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: signal ? AbortSignal.any([timeout,signal]) : timeout });
+    const response = await this.fetchImpl(`${RESOURCE}/models`, { headers: { ...PLAN_REQUEST_IDENTITY, authorization: `Bearer ${token}` }, redirect: 'error', signal: signal ? AbortSignal.any([timeout,signal]) : timeout });
     if (!response.ok) { await response.body?.cancel(); fail('PLAN_CATALOG_UNAVAILABLE'); }
     const body = object(await this.readJson(response));
     if (!Array.isArray(body.models)) fail('PLAN_CATALOG_INVALID');
