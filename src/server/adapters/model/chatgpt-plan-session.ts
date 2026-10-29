@@ -59,6 +59,21 @@ interface Attempt {
   setup: NonNullable<PlanAuthState['setup']>;
 }
 
+const TIER_IDS = ['default', 'priority', 'fast', 'ultrafast', 'auto'];
+const TIER_FIELDS = ['service_tiers', 'additional_speed_tiers', 'default_service_tier', 'serviceTiers', 'additionalSpeedTiers', 'defaultServiceTier'];
+export interface PlanTierCapability {
+  slug: string;
+  serviceTiers: string[];
+  additionalSpeedTiers: string[];
+  defaultServiceTier?: string;
+  metadataFields: string[];
+}
+function knownTiers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.slice(0, 32).map(item => typeof item === 'string' ? item : object(item).id)
+    .filter((item): item is string => typeof item === 'string' && TIER_IDS.includes(item)))];
+}
+
 /** One process/replica owns the directory. Private volume permissions are the security boundary;
  * a local encryption key does not protect against compromise of the complete volume. */
 export class ChatGPTPlanSession {
@@ -202,17 +217,41 @@ export class ChatGPTPlanSession {
 
   async catalog(): Promise<Array<{ slug: string; display_name?: string; visibility: string }>> {
     try {
-      const token = await this.accessToken();
-      const response = await this.fetchImpl(`${RESOURCE}/models`, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) { await response.body?.cancel(); fail('PLAN_CATALOG_UNAVAILABLE'); }
-      const body = object(await this.readJson(response));
-      if (!Array.isArray(body.models)) fail('PLAN_CATALOG_INVALID');
-      return body.models.filter(item => object(item).visibility === 'list').map(item => {
-        const row = object(item);
-        if (!nonempty(row.slug) || row.slug.length > 256) fail('PLAN_CATALOG_INVALID');
+      return (await this.catalogRows()).map(row => {
         return { slug: row.slug, ...(nonempty(row.display_name) ? { display_name: row.display_name.slice(0, 256) } : {}), visibility: 'list' };
       });
     } catch (error) { throw safe(error); }
+  }
+
+  /** Diagnostic-only projection: never retain descriptions, arbitrary tier names or opaque auth metadata. */
+  async inspectTierCatalog(signal?: AbortSignal): Promise<PlanTierCapability[]> {
+    try {
+      return (await this.catalogRows(signal)).map(row => {
+        const defaultServiceTier = [row.default_service_tier, row.defaultServiceTier]
+          .find((value): value is string => typeof value === 'string' && TIER_IDS.includes(value));
+        return {slug: row.slug,
+          serviceTiers: [...new Set([...knownTiers(row.service_tiers), ...knownTiers(row.serviceTiers)])],
+          additionalSpeedTiers: [...new Set([...knownTiers(row.additional_speed_tiers), ...knownTiers(row.additionalSpeedTiers)])],
+          ...(defaultServiceTier ? {defaultServiceTier} : {}),
+          metadataFields: TIER_FIELDS.filter(field => Object.hasOwn(row, field)),
+        };
+      });
+    } catch (error) { throw safe(error); }
+  }
+
+  private async catalogRows(signal?: AbortSignal): Promise<Array<Record<string, unknown> & {slug: string}>> {
+    const token = await this.accessToken();
+    if(signal?.aborted)fail('PLAN_CATALOG_UNAVAILABLE');
+    const timeout=AbortSignal.timeout(30_000);
+    const response = await this.fetchImpl(`${RESOURCE}/models`, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: signal ? AbortSignal.any([timeout,signal]) : timeout });
+    if (!response.ok) { await response.body?.cancel(); fail('PLAN_CATALOG_UNAVAILABLE'); }
+    const body = object(await this.readJson(response));
+    if (!Array.isArray(body.models)) fail('PLAN_CATALOG_INVALID');
+    return body.models.filter(item => object(item).visibility === 'list').map(item => {
+      const row = object(item);
+      if (!nonempty(row.slug) || row.slug.length > 256) fail('PLAN_CATALOG_INVALID');
+      return {...row, slug: row.slug};
+    });
   }
 
   private connectedState(): PlanAuthState {

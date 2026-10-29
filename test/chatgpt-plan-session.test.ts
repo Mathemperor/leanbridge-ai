@@ -26,13 +26,14 @@ async function fixture(existingClient: string | undefined = clientId) {
   let mode = 'ok';
   let claims: Record<string, unknown> = {};
   let tokenOverrides: Record<string, unknown> = {};
+  let catalogModels: unknown[] = [{ slug: 'plan-model', display_name: 'Plan Model', visibility: 'list' }, { slug: 'hidden-model', visibility: 'hide' }];
   let onExchange: (() => Promise<void>) | undefined;
   const requests: URLSearchParams[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url === 'https://api.openai.com/v1/models') {
       expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer access-${counter}`);
-      return Response.json({ models: [{ slug: 'plan-model', display_name: 'Plan Model', visibility: 'list' }, { slug: 'hidden-model', visibility: 'hide' }] });
+      return Response.json({ models: catalogModels });
     }
     expect(url).toBe('https://auth.openai.com/api/accounts/oauth/token');
     const body = new URLSearchParams(String(init?.body)); requests.push(body);
@@ -70,10 +71,31 @@ async function fixture(existingClient: string | undefined = clientId) {
   return { directory, session, options, start, login, requests, get refreshCount() { return refreshCount; },
     advance: (ms: number) => { now += ms; }, setMode: (value: string) => { mode = value; },
     setClaims: (value: Record<string, unknown>) => { claims = value; }, setTokens: (value: Record<string, unknown>) => { tokenOverrides = value; },
+    setCatalog: (value: unknown[]) => { catalogModels = value; },
     setExchangeHandler: (value: () => Promise<void>) => { onExchange = value; } };
 }
 
 describe('ChatGPTPlanSession', () => {
+  it('projects account-specific tier metadata without descriptions, arbitrary strings or hidden rows', async () => {
+    const f = await fixture(); await f.login();
+    f.setCatalog([
+      {slug:'gpt-6-astra',visibility:'list',service_tiers:[{id:'priority',name:'SECRET-name',description:'SECRET-description'},{id:'SECRET-tier'},{id:'default'},'priority'],additional_speed_tiers:['fast','SECRET-speed','fast'],default_service_tier:'default',secret:'SECRET-extra'},
+      {slug:'gpt-5.6-sol',visibility:'list',serviceTiers:[{id:'priority'}],additionalSpeedTiers:['fast'],defaultServiceTier:'SECRET-default'},
+      {slug:'hidden-model',visibility:'hide',service_tiers:[{id:'priority'}]},
+    ]);
+    const capabilities = await f.session.inspectTierCatalog();
+    expect(capabilities).toEqual([
+      {slug:'gpt-6-astra',serviceTiers:['priority','default'],additionalSpeedTiers:['fast'],defaultServiceTier:'default',metadataFields:['service_tiers','additional_speed_tiers','default_service_tier']},
+      {slug:'gpt-5.6-sol',serviceTiers:['priority'],additionalSpeedTiers:['fast'],metadataFields:['serviceTiers','additionalSpeedTiers','defaultServiceTier']},
+    ]);
+    expect(JSON.stringify(capabilities)).not.toContain('SECRET');
+    expect(await f.session.catalog()).toEqual([{slug:'gpt-6-astra',visibility:'list'},{slug:'gpt-5.6-sol',visibility:'list'}]);
+  });
+  it('keeps missing or malformed tier metadata unconfirmed instead of inventing Fast availability', async () => {
+    const f = await fixture(); await f.login();
+    f.setCatalog([{slug:'gpt-6-astra',visibility:'list',service_tiers:{id:'priority'},additional_speed_tiers:['SECRET'],default_service_tier:7}]);
+    expect(await f.session.inspectTierCatalog()).toEqual([{slug:'gpt-6-astra',serviceTiers:[],additionalSpeedTiers:[],metadataFields:['service_tiers','additional_speed_tiers','default_service_tier']}]);
+  });
   it('persists an encrypted grant across restart without exposing tokens in status or setup', async () => {
     const f = await fixture();
     expect(await f.session.status()).toMatchObject({ connected: false, state: 'idle' });

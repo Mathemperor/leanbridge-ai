@@ -4,20 +4,25 @@ import {ChatGPTPlanProofModel,type PlanModelSession} from "./adapters/model/chat
 import {PlanResponseError} from "./adapters/model/plan-stream";
 import {ProofPipeline} from "./domain/proof-pipeline";
 import type {LeanVerifier,VerifyOptions} from "./domain/ports";
+import {runTierCapabilityCheck} from "./tier-capability-check";
+import type {PlanTierCapability} from "./adapters/model/chatgpt-plan-session";
 
 interface Options {
-  id:string;before:string;directory:string;session:PlanModelSession;verifier:LeanVerifier;verifyDefaults:VerifyOptions;
+  id:string;before:string;directory:string;profile?:string;
+  session:PlanModelSession & {inspectTierCatalog?:(signal?:AbortSignal)=>Promise<PlanTierCapability[]>};verifier:LeanVerifier;verifyDefaults:VerifyOptions;
   fetchImpl?:typeof fetch;log:(result:Record<string,unknown>)=>void;
 }
 
 /** Explicit, temporary release diagnostics. No endpoint, tokens or proof text are exposed.
  * Claim before inference so restarts never repeat allowance use for the same check ID. */
 export async function runSubscriptionReleaseCheck(options:Options):Promise<void> {
+  if(options.profile!==undefined&&options.profile!=="compatibility"&&options.profile!=="tier-capabilities-v1")return;
   const deadline=Date.parse(options.before);
   if (!/^fast-\d{8}-[a-z0-9]{1,16}$/.test(options.id)||!Number.isFinite(deadline)||deadline<=Date.now()||deadline>Date.now()+24*60*60*1000) return;
   await mkdir(options.directory,{recursive:true,mode:0o700});
   try {const claim=await open(join(options.directory,`release-${options.id}.claimed`),"wx",0o600);await claim.close();}
   catch(error){if(error&&typeof error==="object"&&"code" in error&&error.code==="EEXIST")return;throw new Error("RELEASE_CHECK_STORAGE_FAILED");}
+  if(options.profile==="tier-capabilities-v1")return runTierCapabilityCheck({...options,deadline});
   const variants=[{name:"legacy"},{name:"standard",speed:"standard"},{name:"fast",speed:"fast"},{name:"priority-alias",speed:"fast"}] as const;
   for(const variant of variants){
     if(Date.now()>=deadline)break;
@@ -40,7 +45,7 @@ export async function runSubscriptionReleaseCheck(options:Options):Promise<void>
       ...(failure?{error:{code:failure.code,status:failure.status,upstreamCode:failure.upstreamCode,param:failure.param,providerType:failure.providerType,bodyShape:failure.bodyShape,requestId:failure.requestId}}:{})});
     // Shared auth, quota, model or transport failures invalidate further controls.
     // Only a request-level 400 or explicit tier rejection justifies alias comparison.
-    if(failure&&failure.code!=="CODEX_SPEED_UNAVAILABLE"&&!(failure.code==="CODEX_RESPONSE_FAILED"&&failure.status===400))break;
+    if(failure&&!(failure.status===400&&(failure.code==="CODEX_SPEED_UNAVAILABLE"||failure.code==="CODEX_RESPONSE_FAILED")))break;
     if(!failure&&result.status!=="verified"&&(!result.verification||result.verification.status!=="failed"))break;
   }
 }

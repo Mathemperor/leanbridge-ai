@@ -91,6 +91,7 @@ app.listen(config.port, () => {
   const checkBefore=runtimeEnvironment.LEANBRIDGE_RELEASE_CHECK_BEFORE;
   if(planSession&&checkId&&checkBefore){
     void runSubscriptionReleaseCheck({id:checkId,before:checkBefore,directory:config.planAuthDirectory!,session:planSession,verifier,verifyDefaults,
+      ...(runtimeEnvironment.LEANBRIDGE_RELEASE_CHECK_PROFILE?{profile:runtimeEnvironment.LEANBRIDGE_RELEASE_CHECK_PROFILE}:{}),
       log:result=>console.log(`LEANBRIDGE_RELEASE_CHECK=${JSON.stringify(result)}`),
     }).catch(()=>console.log('LEANBRIDGE_RELEASE_CHECK={"status":"diagnostic-unavailable"}'));
   }
