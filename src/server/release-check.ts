@@ -18,14 +18,14 @@ export async function runSubscriptionReleaseCheck(options:Options):Promise<void>
   await mkdir(options.directory,{recursive:true,mode:0o700});
   try {const claim=await open(join(options.directory,`release-${options.id}.claimed`),"wx",0o600);await claim.close();}
   catch(error){if(error&&typeof error==="object"&&"code" in error&&error.code==="EEXIST")return;throw new Error("RELEASE_CHECK_STORAGE_FAILED");}
-  const variants=[{name:"legacy"},{name:"standard",speed:"standard"},{name:"fast",speed:"fast"},{name:"priority-alias",speed:"fast",priority:true}] as const;
+  const variants=[{name:"legacy"},{name:"standard",speed:"standard"},{name:"fast",speed:"fast"},{name:"priority-alias",speed:"fast"}] as const;
   for(const variant of variants){
     if(Date.now()>=deadline)break;
     let failure:PlanResponseError|undefined;
     const transport:typeof fetch=async(url,init)=>{
-      if("priority" in variant&&variant.priority&&String(url)==="https://api.openai.com/v1/responses"&&init?.body){
+      if((variant.name==="fast"||variant.name==="priority-alias")&&String(url)==="https://api.openai.com/v1/responses"&&init?.body){
         const body=JSON.parse(String(init.body));
-        if(body.service_tier==="fast")return (options.fetchImpl??fetch)(url,{...init,body:JSON.stringify({...body,service_tier:"priority"})});
+        if(body.service_tier==="fast"||body.service_tier==="priority")return (options.fetchImpl??fetch)(url,{...init,body:JSON.stringify({...body,service_tier:variant.name==="fast"?"fast":"priority"})});
       }
       return (options.fetchImpl??fetch)(url,init);
     };

@@ -114,7 +114,9 @@ export class ChatGPTPlanProofModel implements ProofModel {
         method: "POST", redirect: "error", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, signal,
         body: JSON.stringify({
           model: settings.model, reasoning: { effort: settings.reasoningEffort },
-          ...(settings.speed ? {service_tier:settings.speed === "fast" ? "fast" : "default"} : {}),
+          // Use the documented Fast alias accepted by this subscription route.
+          // Only terminal response metadata confirms the tier actually provided.
+          ...(settings.speed ? {service_tier:settings.speed === "fast" ? "priority" : "default"} : {}),
           instructions: stage.instructions, input: [{ role: "user", content }], store: false, stream: true,
           text: { format: { type: "json_schema", name: stage.name, strict: true, schema: stage.schema } },
         }),

@@ -13,7 +13,7 @@ const response = (value: unknown) => new Response(new TextEncoder().encode(`data
 afterEach(() => vi.useRealTimers());
 
 describe("ChatGPT plan proof model", () => {
-  it.each([["fast", "fast"], ["standard", "default"], [undefined, undefined]] as const)("routes selected speed %s without changing model or effort", async (speed, tier) => {
+  it.each([["fast", "priority"], ["standard", "default"], [undefined, undefined]] as const)("routes selected speed %s without changing model or effort", async (speed, tier) => {
     let payload: Record<string, unknown> = {};
     const model = new ChatGPTPlanProofModel({ model: "gpt-6-astra", reasoningEffort: "max" }, session(), async (_url, init) => {
       payload = JSON.parse(String(init?.body));
@@ -39,7 +39,7 @@ describe("ChatGPT plan proof model", () => {
     await pipeline.run(job.id);
     const result = pipeline.get(job.id)!;
     expect(result.status).toBe("verified");
-    expect(requests.map(r=>r.service_tier)).toEqual(["fast","fast","fast"]);
+    expect(requests.map(r=>r.service_tier)).toEqual(["priority","priority","priority"]);
     expect(result.modelConfig).toMatchObject({model:"gpt-6-astra",reasoningEffort:"high",speed:"fast"});
     expect(result.imageTranscription?.serviceTier).toBe("priority");
     expect(result.translation?.serviceTier).toBe("fast");
@@ -59,7 +59,7 @@ describe("ChatGPT plan proof model", () => {
     const results = await Promise.allSettled([model.translate({...text,speed:"fast"}),model.translate({...text,speed:"standard"})]);
     expect(results[0]).toMatchObject({status:"rejected",reason:{code:"CODEX_SPEED_UNAVAILABLE"}});
     expect(results[1].status).toBe("fulfilled");
-    expect(tiers).toEqual(["fast","default"]);
+    expect(tiers).toEqual(["priority","default"]);
   });
 
   it("uses OAuth Responses with the exact selected settings and strict structured output", async () => {

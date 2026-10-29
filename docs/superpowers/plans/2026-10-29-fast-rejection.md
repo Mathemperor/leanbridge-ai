@@ -9,10 +9,14 @@ To investigate without asking the phone owner for repeated trials, prepare an ex
 - [x] Save actual production failure evidence and isolate the pre-Lean HTTP failure.
 - [x] Observe failing metadata regressions, implement bounded diagnostics and one-shot release check, pass focused regressions.
 - [x] Pass full backend test/typecheck/build and one independent read-only review. Final 321 tests and build (including typecheck) passed after review corrections.
-- [ ] Publish an exact immutable verified image; stage the image and temporary check flags. Explain all four control calls in the deploy handoff and respect native approval.
-- [ ] Inspect real control results before changing the production speed transport or claiming account availability. If a specific documented alias fixes the request, apply that single verified fix; if the account/route denies Fast, say so and keep Standard usable.
+- [x] Publish an exact immutable verified image; stage the image and temporary check flags. Explain all four control calls in the deploy handoff and respect native approval.
+- [x] Inspect real control results before changing the production speed transport or claiming account availability. The documented priority alias fixes request rejection, but the returned tier was default, not confirmed Fast.
 - [ ] Disable temporary checks, update delivery evidence and complete real mobile Fast/Lean acceptance when supported.
 
 Official references fetched 2026-10-29: https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery ; https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations ; https://developers.openai.com/api/docs/guides/fast-mode ; https://learn.chatgpt.com/docs/agent-configuration/speed . Official Fast support in Codex is not proof of entitlement through this saved-grant integration.
 
 Independent review: recognized auth/quota/model/transport codes now take priority over a generic 400 + service_tier parameter. The probe stops for unavailable/timed-out compilation or verifier startup/queue errors, while ordinary compiler rejection can remain an independent transport diagnostic. Both findings had observed RED→GREEN regressions; final suite/build passed after the fixes. Live account entitlement and alias acceptance remain deliberately unclaimed until production evidence.
+
+Production evidence, diagnostic image e664aff, deployment e9ced195-4446-4329-9fb1-0984122aafc5, 2026-10-29 13:41–13:42 UTC: omitted tier and explicit default both generated and passed real LeanWeb (2833/3494 ms). Literal fast returned HTTP400 with a detail-shaped admission error. Priority alias generated and passed real LeanWeb (3455 ms), but the terminal response reported serviceTier=default. Therefore use the verified official alias for request compatibility, retain exact requested/actual reporting, and do not claim a Fast latency or usage entitlement. The production sample cannot establish a 1.5x benefit.
+
+Both temporary flags have been cleared with skipDeploys=true for subsequent starts. The completed check's private-volume claim prevents repetitions in the current image. Ordinary application inference still uses the original transport until the priority fix image is deployed. The diagnostic harness will keep explicit wire fast/priority comparisons independent of the application's new default alias.
